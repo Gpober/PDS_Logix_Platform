@@ -6,6 +6,19 @@ PDS Logix is a vehicle services platform with three service lines —
 **asset** (a vehicle) and is performed by a **staff** member. Pricing is
 isolated so only owner/admin can see it.
 
+## Live project
+
+Provisioned on Supabase as **"PDS Logix CRM"** (a dedicated project, separate
+from the I AM CFO finance/payroll back-office):
+
+- Project ref: `xqyxpefsukilkqevspfv`
+- URL: `https://xqyxpefsukilkqevspfv.supabase.co`
+- Region: `us-east-1`
+
+Migrations `0001`–`0004` and `seed.sql` are **already applied** here. RLS is
+enabled on all tables. Put the URL + publishable (anon) key in `.env.local`
+(see `.env.example`).
+
 Apply these in order in the **Supabase SQL editor** (or `psql`):
 
 1. `migrations/0001_schema.sql` — tables, enums, FKs, indexes, `profiles` + signup trigger
