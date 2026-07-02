@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-base text-ink font-sans antialiased;
+  }
+  ::selection {
+    @apply bg-pds text-ink;
+  }
+}
+
+@layer components {
+  .container-x {
+    @apply mx-auto w-full max-w-container px-5 sm:px-8;
+  }
+  .eyebrow {
+    @apply text-xs uppercase tracking-[0.22em] text-pds-dark font-semibold;
+  }
+}

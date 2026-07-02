@@ -95,6 +95,11 @@ grant select on
   public.public_work
   to anon, authenticated;
 
+-- leads is created in THIS migration, i.e. after 0002's blanket revoke, so
+-- Supabase default privileges would auto-grant anon full table access. Strip it
+-- back to INSERT-only before granting the specific insert columns.
+revoke all on public.leads from anon;
+
 grant insert (name, email, phone, company, service_type, message, source)
   on public.leads to anon;
 

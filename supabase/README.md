@@ -25,7 +25,8 @@ Apply these in order in the **Supabase SQL editor** (or `psql`):
 2. `migrations/0002_rls.sql` — `is_owner()`, grants, RLS policies
 3. `migrations/0003_views.sql` — derived-field + pricing-aware views
 4. `migrations/0004_public.sql` — public website surface (flags, `leads`, `public_*` views)
-5. `seed.sql` — CRM sample data (run once on an empty DB)
+5. `migrations/0005_leads_grant_hardening.sql` — strip anon on `leads` back to INSERT-only
+6. `seed.sql` — CRM sample data (run once on an empty DB)
 
 ## Entities
 

@@ -7,11 +7,25 @@ modeled on the Tulips Talent platform.
 
 - **Phase 1 — Data layer** (`supabase/`): Clients, Contacts, Staff, Assets,
   Jobs, Condition Reports, with owner-only pricing isolation and RLS. ✅
-- **Phase 2 — Internal CRM** (`app/crm`, planned): a Next.js app where the team
-  manages clients, schedules jobs, assigns staff, and files condition reports.
-- **Phase 3 — Public website** (planned): a polished marketing site that reads
-  the *same* Supabase backend through a locked-down anonymous role (services,
-  a "trusted by" client wall, a work portfolio, and a "request a quote" form).
+- **Phase 2 — Internal CRM** (`app/crm`): a Next.js app where the team manages
+  clients, contacts, vehicles, jobs, staff, and leads. Owner-only pricing. ✅
+- **Phase 3 — Public website** (`app/`): marketing landing (services + stats)
+  and a public "request a quote" form that writes a lead under the locked-down
+  anon role. ✅ (client wall / work portfolio views exist in the DB, ready to
+  surface next.)
+
+## Run locally
+
+```bash
+cp .env.example .env.local   # fill in NEXT_PUBLIC_SUPABASE_URL + ANON_KEY
+npm install
+npm run dev                  # http://localhost:3000
+```
+
+The app is Next.js (App Router, TypeScript) + Tailwind + `@supabase/ssr`.
+Public pages (`/`, `/contact`) render for anyone; `/crm` is gated by Supabase
+auth via middleware. Create the first owner in Supabase Auth, then
+`update profiles set role='owner' where email='you@pdslogix.com';`
 
 ## Domain model
 
