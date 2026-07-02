@@ -91,6 +91,36 @@ export interface JobWithPricing {
   cost: number | null;
 }
 
+export interface Finding {
+  area: string;
+  severity: string; // minor | moderate | severe
+  description: string;
+  cost_estimate: number | null;
+}
+
+export interface Photo {
+  url: string;
+  label: string;
+}
+
+export const SEVERITIES = ['minor', 'moderate', 'severe'] as const;
+export const GRADES = ['excellent', 'good', 'fair', 'poor'] as const;
+
+export interface ConditionReport {
+  id: string;
+  job_id: string;
+  asset_id: string | null;
+  overall_grade: string | null;
+  mileage: number | null;
+  exterior_notes: string | null;
+  interior_notes: string | null;
+  mechanical_notes: string | null;
+  findings: Finding[];
+  photos: Photo[];
+  inspected_by: string | null;
+  inspected_at: string | null;
+}
+
 export interface Lead {
   id: string;
   name: string;

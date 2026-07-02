@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createServerSupabase } from '@/lib/supabase/server';
-import type { JobStatus, ServiceType } from './types';
+import type { Finding, JobStatus, Photo, ServiceType } from './types';
 
 function str(form: FormData, key: string): string | null {
   const v = form.get(key);
@@ -148,4 +148,66 @@ export async function saveJob(form: FormData) {
 
   revalidatePath('/crm/jobs');
   redirect('/crm/jobs');
+}
+
+// ---- Condition reports --------------------------------------------------
+// findings/photos arrive as JSON strings from the client editor.
+function parseFindings(raw: string | null): Finding[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((f): Finding => ({
+        area: String(f.area ?? '').trim(),
+        severity: String(f.severity ?? 'minor'),
+        description: String(f.description ?? '').trim(),
+        cost_estimate:
+          f.cost_estimate === null || f.cost_estimate === '' || f.cost_estimate === undefined
+            ? null
+            : Number(f.cost_estimate) || null,
+      }))
+      .filter((f) => f.area || f.description);
+  } catch {
+    return [];
+  }
+}
+
+function parsePhotos(raw: string | null): Photo[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((p): Photo => ({ url: String(p.url ?? '').trim(), label: String(p.label ?? '').trim() }))
+      .filter((p) => p.url);
+  } catch {
+    return [];
+  }
+}
+
+export async function saveConditionReport(form: FormData) {
+  const supabase = await createServerSupabase();
+  const jobId = str(form, 'job_id');
+  if (!jobId) redirect('/crm/jobs');
+
+  const payload = {
+    job_id: jobId,
+    asset_id: str(form, 'asset_id'),
+    overall_grade: str(form, 'overall_grade'),
+    mileage: num(form, 'mileage'),
+    exterior_notes: str(form, 'exterior_notes'),
+    interior_notes: str(form, 'interior_notes'),
+    mechanical_notes: str(form, 'mechanical_notes'),
+    findings: parseFindings(str(form, 'findings_json')),
+    photos: parsePhotos(str(form, 'photos_json')),
+    inspected_by: str(form, 'inspected_by'),
+    inspected_at: str(form, 'inspected_at'),
+  };
+
+  await supabase.from('condition_reports').upsert(payload, { onConflict: 'job_id' });
+
+  revalidatePath(`/crm/jobs/${jobId}`);
+  revalidatePath('/crm/reports');
+  redirect(`/crm/jobs/${jobId}`);
 }

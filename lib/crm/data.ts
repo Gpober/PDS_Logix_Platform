@@ -3,6 +3,7 @@ import type {
   Asset,
   Client,
   ClientOverview,
+  ConditionReport,
   Contact,
   JobWithPricing,
   Lead,
@@ -144,6 +145,69 @@ async function hydrateJobs(rows: JobWithPricing[]): Promise<JobListRow[]> {
     client_name: cMap.get(r.client_id) ?? 'Unknown',
     staff_name: r.assigned_staff_id ? sMap.get(r.assigned_staff_id) ?? null : null,
     vehicle: r.asset_id ? aMap.get(r.asset_id) ?? '—' : '—',
+  }));
+}
+
+export async function getJob(id: string): Promise<JobListRow | null> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from('jobs_with_pricing')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (!data) return null;
+  const [row] = await hydrateJobs([data as JobWithPricing]);
+  return row ?? null;
+}
+
+// ---- Condition reports --------------------------------------------------
+export async function getConditionReport(jobId: string): Promise<ConditionReport | null> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from('condition_reports')
+    .select('*')
+    .eq('job_id', jobId)
+    .maybeSingle();
+  return (data as ConditionReport) ?? null;
+}
+
+export interface ConditionReportRow {
+  id: string;
+  job_id: string;
+  overall_grade: string | null;
+  mileage: number | null;
+  inspected_at: string | null;
+  finding_count: number;
+  client_name: string;
+  vehicle: string;
+}
+
+export async function listConditionReports(): Promise<ConditionReportRow[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from('condition_reports')
+    .select('id, job_id, overall_grade, mileage, inspected_at, findings')
+    .order('inspected_at', { ascending: false, nullsFirst: false });
+  const reports =
+    (data as {
+      id: string;
+      job_id: string;
+      overall_grade: string | null;
+      mileage: number | null;
+      inspected_at: string | null;
+      findings: unknown[] | null;
+    }[]) ?? [];
+  if (reports.length === 0) return [];
+  const jobs = await Promise.all(reports.map((r) => getJob(r.job_id)));
+  return reports.map((r, i) => ({
+    id: r.id,
+    job_id: r.job_id,
+    overall_grade: r.overall_grade,
+    mileage: r.mileage,
+    inspected_at: r.inspected_at,
+    finding_count: Array.isArray(r.findings) ? r.findings.length : 0,
+    client_name: jobs[i]?.client_name ?? 'Unknown',
+    vehicle: jobs[i]?.vehicle ?? '—',
   }));
 }
 

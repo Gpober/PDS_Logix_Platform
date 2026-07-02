@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { listJobs, getCurrentProfile } from '@/lib/crm/data';
 import { serviceLabel, statusLabel, statusClasses, money } from '@/lib/format';
 import { CrmHeader, Empty, Pill, Table, Td, Th } from '@/components/crm/ui';
@@ -27,7 +28,11 @@ export default async function JobsPage() {
         >
           {jobs.map((j) => (
             <tr key={j.id} className="hover:bg-mist/50">
-              <Td>{j.client_name}</Td>
+              <Td>
+                <Link href={`/crm/jobs/${j.id}`} className="font-medium text-ink hover:text-pds-dark">
+                  {j.client_name}
+                </Link>
+              </Td>
               <Td>{j.vehicle}</Td>
               <Td>{serviceLabel(j.service_type)}</Td>
               <Td>
