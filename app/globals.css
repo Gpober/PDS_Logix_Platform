@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-ivory text-ink font-sans antialiased;
+  }
+  ::selection {
+    @apply bg-tulip text-ivory;
+  }
+}
+
+@layer components {
+  .container-x {
+    @apply mx-auto w-full max-w-container px-5 sm:px-8;
+  }
+  .eyebrow {
+    @apply text-xs uppercase tracking-[0.22em] text-tulip font-medium;
+  }
+  .link-underline {
+    @apply relative after:absolute after:left-0 after:-bottom-0.5 after:h-px after:w-0 after:bg-current after:transition-all hover:after:w-full;
+  }
+}
+
+@layer utilities {
+  /* Cinematic entrance — hero copy rises + fades on load. */
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(28px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .rise {
+    animation: rise 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .rise-1 {
+    animation-delay: 0.05s;
+  }
+  .rise-2 {
+    animation-delay: 0.18s;
+  }
+  .rise-3 {
+    animation-delay: 0.32s;
+  }
+  .rise-4 {
+    animation-delay: 0.46s;
+  }
+
+  /* Slow editorial zoom on the hero imagery. */
+  @keyframes kenburns {
+    from {
+      transform: scale(1);
+    }
+    to {
+      transform: scale(1.12);
+    }
+  }
+  .kenburns {
+    animation: kenburns 14s ease-out both;
+  }
+
+  /* Infinite marquee for the vertical/name ticker. */
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  .animate-marquee {
+    animation: marquee 32s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise,
+    .kenburns,
+    .animate-marquee {
+      animation: none;
+    }
+  }
+}
