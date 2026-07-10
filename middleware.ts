@@ -46,9 +46,20 @@ export async function middleware(request: NextRequest) {
 
   let response = NextResponse.next({ request });
 
+  // Fail open when Supabase isn't configured yet. Without these env vars,
+  // createServerClient() throws (invalid URL) and — because this middleware runs
+  // on nearly every route — would 500 the entire site (MIDDLEWARE_INVOCATION_FAILED).
+  // Skipping auth here lets the public pages render; /crm + /portal simply can't
+  // be gated until the keys are set in the environment.
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return response;
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
