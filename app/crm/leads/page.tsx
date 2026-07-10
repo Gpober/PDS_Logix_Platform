@@ -1,93 +1,51 @@
-import Link from 'next/link';
 import { listLeads } from '@/lib/crm/data';
-import { CrmHeader, Empty, Table, Td, Th } from '@/components/crm/ui';
-import { LeadsFilter } from '@/components/crm/LeadsFilter';
+import { deleteLead } from '@/lib/crm/actions';
+import { formatDate } from '@/lib/format';
+import { CrmHeader, Table, Th, Td, Empty } from '@/components/crm/ui';
 
-// Primary owner name, stripping the "(with Brad)" / "collab@" style suffixes so
-// all of Jess's variants group under one filter value.
-const primaryOwner = (owner: string | null) =>
-  (owner ?? '').split(/\s*\(|\//)[0].trim();
+export const dynamic = 'force-dynamic';
 
-export default async function LeadsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ owner?: string; due?: string }>;
-}) {
-  const { owner, due } = await searchParams;
-  const all = await listLeads();
-  const today = new Date().toISOString().slice(0, 10);
-
-  const owners = [...new Set(all.map((l) => primaryOwner(l.owner)).filter(Boolean))].sort();
-
-  let leads = all;
-  if (owner) leads = leads.filter((l) => primaryOwner(l.owner) === owner);
-  if (due === '1')
-    leads = leads.filter((l) => l.next_eligible_on != null && l.next_eligible_on <= today);
-
-  const dueCount = all.filter(
-    (l) => l.next_eligible_on != null && l.next_eligible_on <= today,
-  ).length;
-
+export default async function LeadsPage() {
+  const leads = await listLeads();
   return (
-    <>
+    <div className="mx-auto max-w-5xl">
       <CrmHeader title="Leads" />
-      <p className="mb-6 -mt-3 text-center text-sm text-stone">
-        {dueCount} due · {all.length} total
-      </p>
-      {owners.length > 0 && <LeadsFilter owners={owners} />}
       {leads.length === 0 ? (
-        <Empty>No leads match this filter.</Empty>
+        <Empty>No inbound leads yet.</Empty>
       ) : (
         <Table
           head={
             <tr>
               <Th>Name</Th>
+              <Th>Company</Th>
+              <Th>Service</Th>
               <Th>Email</Th>
-              <Th>Owner</Th>
-              <Th>Next eligible</Th>
-              <Th>Source</Th>
+              <Th>Phone</Th>
+              <Th>Received</Th>
+              <Th>{' '}</Th>
             </tr>
           }
         >
-          {leads.map((l) => {
-            const due = l.next_eligible_on != null && l.next_eligible_on <= today;
-            return (
-              <tr key={l.id} className="hover:bg-blush/30">
-                <Td>
-                  <Link href={`/crm/leads/${l.id}`} className="font-medium hover:text-tulip">
-                    {l.name}
-                  </Link>
-                </Td>
-                <Td>
-                  {l.email ? (
-                    <a href={`mailto:${l.email}`} className="text-tulip hover:underline">
-                      {l.email}
-                    </a>
-                  ) : (
-                    '—'
-                  )}
-                </Td>
-                <Td>{l.owner ?? '—'}</Td>
-                <Td>
-                  {l.next_eligible_on ? (
-                    <span className="inline-flex items-center gap-2">
-                      {l.next_eligible_on}
-                      {due && (
-                        <span className="rounded-full bg-tulip/15 px-2 py-0.5 text-xs font-medium text-tulip">
-                          Due
-                        </span>
-                      )}
-                    </span>
-                  ) : (
-                    l.next_eligible_text ?? '—'
-                  )}
-                </Td>
-                <Td>{l.source === 'asana:pitch-engine' ? 'Pitch engine' : l.source}</Td>
-              </tr>
-            );
-          })}
+          {leads.map((l) => (
+            <tr key={l.id} className="align-top hover:bg-blush/30">
+              <Td>
+                <div className="font-medium">{l.name}</div>
+                {l.message && <div className="mt-1 max-w-xs text-xs text-stone">{l.message}</div>}
+              </Td>
+              <Td>{l.company ?? '—'}</Td>
+              <Td>{l.service_type ?? '—'}</Td>
+              <Td>{l.email}</Td>
+              <Td>{l.phone ?? '—'}</Td>
+              <Td>{formatDate(l.created_at)}</Td>
+              <Td>
+                <form action={deleteLead.bind(null, l.id)}>
+                  <button className="text-xs text-stone hover:text-tulip">Delete</button>
+                </form>
+              </Td>
+            </tr>
+          ))}
         </Table>
       )}
-    </>
+    </div>
   );
 }

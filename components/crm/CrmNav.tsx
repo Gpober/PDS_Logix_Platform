@@ -6,16 +6,12 @@ import { usePathname } from 'next/navigation';
 const tabs = [
   { href: '/crm', label: 'Home' },
   { href: '/crm/assistant', label: 'Assistant' },
-  { href: '/crm/companies', label: 'Companies' },
-  { href: '/crm/talent', label: 'Talent' },
-  { href: '/crm/content', label: 'Content' },
-  { href: '/crm/deals', label: 'Deals' },
-  { href: '/crm/performance', label: 'Performance' },
-  { href: '/crm/analytics', label: 'Analytics' },
-  { href: '/crm/financials', label: 'Financials' },
+  { href: '/crm/clients', label: 'Clients' },
+  { href: '/crm/contacts', label: 'Contacts' },
+  { href: '/crm/staff', label: 'Staff' },
+  { href: '/crm/assets', label: 'Assets' },
+  { href: '/crm/jobs', label: 'Jobs' },
   { href: '/crm/leads', label: 'Leads' },
-  { href: '/crm/tasks', label: 'Tasks' },
-  { href: '/crm/settings', label: 'Settings' },
 ];
 
 export function CrmNav({ onNavigate }: { onNavigate?: () => void }) {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCurrentProfile, listAssistantMemories } from '@/lib/crm/data';
+import { getCurrentProfile } from '@/lib/crm/data';
 import { assistantConfigured, runAssistant, type AssistantMessage } from '@/lib/assistant/llm';
 import { buildSystemPrompt } from '@/lib/assistant/prompt';
 import { ASSISTANT_TOOLS, runAssistantTool } from '@/lib/assistant/tools';
@@ -46,8 +46,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Expected a user message.' }, { status: 400 });
   }
 
-  const memories = await listAssistantMemories();
-  const system = buildSystemPrompt(profile, memories);
+  const system = buildSystemPrompt(profile);
 
   // NDJSON stream: one JSON object per line. {t:'text'|'tool'|'error', v:...}
   const encoder = new TextEncoder();

@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ASSISTANT_NAME } from '@/lib/assistant/config';
 
@@ -14,30 +13,21 @@ interface Msg {
 // the client bundle never imports the server-only tools module.
 const TOOL_LABELS: Record<string, string> = {
   data_overview: 'Getting oriented',
-  sales_analytics: 'Reading the sales report',
-  cash_calendar: 'Reading the cash calendar',
-  search_companies: 'Searching companies',
-  get_company: 'Reading company profile',
-  list_talent: 'Reading the roster',
-  get_talent: 'Reading talent profile',
-  get_instagram_stats: 'Analyzing Instagram',
-  search_deals: 'Reading deals',
+  list_clients: 'Reading clients',
+  get_client: 'Reading client profile',
+  list_staff: 'Reading the staff roster',
+  list_assets: 'Reading assets',
+  list_jobs: 'Reading jobs',
+  get_job: 'Reading the job',
   list_leads: 'Reading the lead pipeline',
-  get_lead: 'Reading the lead',
-  save_draft: 'Saving a draft',
-  talent_performance: 'Ranking talent performance',
-  company_performance: 'Ranking company performance',
-  content_schedule: 'Reading the content calendar',
-  remember: 'Saving to memory',
-  delegate: 'Consulting the team',
 };
 const labelFor = (name: string) => TOOL_LABELS[name] ?? name;
 
 const STARTERS = [
-  'How are we doing against our annual goal this year?',
-  'Analyze our top creator’s Instagram — engagement and audience.',
-  'Who owes us money right now, and how much?',
-  'Assemble the team to help our top creator grow.',
+  'How are we doing right now — jobs, pipeline, and invoiced totals?',
+  'Which jobs are scheduled but not yet completed?',
+  'Show me our biggest clients by number of jobs.',
+  'What inbound leads have come in, and what do they want?',
 ];
 
 export function AssistantChat({ userName }: { userName?: string | null }) {
@@ -50,7 +40,6 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, busy]);
 
-  // Mutate the trailing (assistant) message in place.
   const patchLast = (fn: (m: Msg) => Msg) =>
     setMessages((prev) => {
       const copy = [...prev];
@@ -93,7 +82,7 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split('\n');
-        buf = lines.pop() ?? ''; // keep the trailing partial line
+        buf = lines.pop() ?? '';
         for (const line of lines) {
           if (!line.trim()) continue;
           let ev: { t: string; v: string };
@@ -122,14 +111,6 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
     <div className="mx-auto flex h-[calc(100vh-11rem)] max-w-3xl flex-col">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium text-ink">{ASSISTANT_NAME}</span>
-        <span className="flex items-center gap-3">
-          <Link href="/crm/assistant/memory" className="text-xs text-tulip hover:underline">
-            Memory
-          </Link>
-          <Link href="/crm/assistant/drafts" className="text-xs text-tulip hover:underline">
-            Drafts →
-          </Link>
-        </span>
       </div>
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto pb-4">
         {empty ? (
@@ -137,8 +118,8 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
             <div>
               <h1 className="font-display text-3xl">{ASSISTANT_NAME}</h1>
               <p className="mt-2 max-w-md text-sm text-stone">
-                Your agency chief of staff{userName ? `, ${userName.split(' ')[0]}` : ''}. Ask about deals,
-                producers, who owes what, or a creator’s Instagram — she reads it live from the CRM.
+                Your PDS Logix operations assistant{userName ? `, ${userName.split(' ')[0]}` : ''}. Ask
+                about jobs, clients, staff, assets, or leads — it reads live from the CRM.
               </p>
             </div>
             <div className="grid w-full max-w-lg gap-2 sm:grid-cols-2">
@@ -159,7 +140,6 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
             const activity = m.tools && m.tools.length > 0 ? m.tools[m.tools.length - 1] : null;
             return (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex flex-col items-start'}>
-                {/* What Zordon read (assistant only) */}
                 {m.role === 'assistant' && m.tools && m.tools.length > 0 && (
                   <div className="mb-1 max-w-[85%] text-xs text-stone">
                     {busy && last && !m.content

@@ -1,177 +1,183 @@
--- =============================================================================
--- Tulips Talent CRM — 0001_schema.sql
--- Core tables, enums, foreign keys, indexes, profiles + auth trigger.
--- Run this FIRST. Safe to re-run (uses IF NOT EXISTS / OR REPLACE where possible).
--- Apply via Supabase SQL editor (or psql). RLS policies are in 0002, views in 0003.
--- =============================================================================
+-- PDS Logix CRM — schema
+-- Vehicle field-service business: condition-report inspections, detailing, and
+-- biohazard remediation for dealers, fleets, and insurers.
+--
+-- This mirrors the deployed Supabase project (the live database is the source of
+-- truth). Apply in order: 0001_schema.sql then 0002_rls.sql.
 
--- gen_random_uuid() lives in pgcrypto (pre-installed on Supabase, included for portability).
-create extension if not exists pgcrypto;
+create extension if not exists "pgcrypto";
 
--- -----------------------------------------------------------------------------
--- Shared helper: keep updated_at fresh on UPDATE.
--- -----------------------------------------------------------------------------
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-as $$
+-- Enums -----------------------------------------------------------------------
+do $$ begin
+  create type service_type as enum ('condition_report', 'detailing', 'biohazard');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type job_status as enum ('requested', 'scheduled', 'in_progress', 'completed', 'invoiced');
+exception when duplicate_object then null; end $$;
+
+-- updated_at helper -----------------------------------------------------------
+create or replace function set_updated_at()
+returns trigger language plpgsql as $$
 begin
-  new.updated_at := now();
+  new.updated_at = now();
   return new;
-end;
-$$;
+end $$;
 
--- -----------------------------------------------------------------------------
--- profiles: one row per auth user, carries the role used by RLS.
--- Self-signup is disabled in Supabase Auth (invite-only); the trigger below
--- still backfills a 'member' profile whenever you create a user.
--- -----------------------------------------------------------------------------
-create table if not exists public.profiles (
-  id         uuid primary key references auth.users(id) on delete cascade,
-  full_name  text,
-  email      text,
-  role       text not null default 'member' check (role in ('owner', 'admin', 'member')),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+-- Profiles (one per auth user) ------------------------------------------------
+create table if not exists profiles (
+  id          uuid primary key references auth.users (id) on delete cascade,
+  full_name   text,
+  email       text,
+  role        text not null default 'member' check (role in ('owner', 'admin', 'member')),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
 );
 
-drop trigger if exists trg_profiles_updated_at on public.profiles;
-create trigger trg_profiles_updated_at
-  before update on public.profiles
-  for each row execute function public.set_updated_at();
-
--- Auto-create a profile (role='member') for every new auth user.
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
+-- New signups automatically get a member profile.
+create or replace function handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, email, full_name, role)
-  values (
-    new.id,
-    new.email,
-    coalesce(new.raw_user_meta_data ->> 'full_name', new.email),
-    'member'
-  )
+  insert into public.profiles (id, full_name, email)
+  values (new.id, new.raw_user_meta_data ->> 'full_name', new.email)
   on conflict (id) do nothing;
   return new;
-end;
-$$;
+end $$;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
-  for each row execute function public.handle_new_user();
+  for each row execute function handle_new_user();
 
--- -----------------------------------------------------------------------------
--- Core CRM entities.
--- -----------------------------------------------------------------------------
-create table if not exists public.brands (
-  id             uuid primary key default gen_random_uuid(),
-  name           text not null,
-  category       text,
-  employee_count integer,
-  website        text,
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
+-- Clients (dealers, fleets, insurers) -----------------------------------------
+create table if not exists clients (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null,
+  category      text,
+  website       text,
+  billing_email text,
+  phone         text,
+  address       text,
+  notes         text,
+  logo_url      text,
+  is_public     boolean not null default false,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
-create table if not exists public.agencies (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  website    text,
-  notes      text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists public.talent (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  handle     text,
-  category   text,
-  notes      text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
--- A person belongs to a brand OR an agency (at least one is required).
-create table if not exists public.people (
+create table if not exists contacts (
   id         uuid primary key default gen_random_uuid(),
   name       text not null,
   email      text,
   phone      text,
   title      text,
-  brand_id   uuid references public.brands(id) on delete set null,
-  agency_id  uuid references public.agencies(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint people_linked_to_one check (brand_id is not null or agency_id is not null)
-);
-
--- deal_status drives the pipeline. Created idempotently.
-do $$
-begin
-  if not exists (select 1 from pg_type where typname = 'deal_status') then
-    create type public.deal_status as enum ('pitched', 'confirmed', 'live', 'completed');
-  end if;
-end
-$$;
-
--- deals: the join between brands and talent. NOTE: budget is NOT here — it lives
--- in deal_budgets so it can be locked to owner/admin at the row level (see 0002).
-create table if not exists public.deals (
-  id           uuid primary key default gen_random_uuid(),
-  brand_id     uuid not null references public.brands(id) on delete cascade,
-  talent_id    uuid not null references public.talent(id) on delete cascade,
-  booking_date date,
-  status       public.deal_status not null default 'pitched',
-  live_url     text,
-  notes        text,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
-);
-
--- deal_budgets: privileged 1:1 extension of deals. Owner/admin-only via RLS.
-create table if not exists public.deal_budgets (
-  deal_id    uuid primary key references public.deals(id) on delete cascade,
-  budget     numeric(12, 2),
+  client_id  uuid not null references clients (id) on delete cascade,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
--- updated_at triggers for the entity tables.
-drop trigger if exists trg_brands_updated_at on public.brands;
-create trigger trg_brands_updated_at before update on public.brands
-  for each row execute function public.set_updated_at();
+-- Staff (technicians / inspectors) --------------------------------------------
+create table if not exists staff (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  email      text,
+  phone      text,
+  title      text,
+  is_active  boolean not null default true,
+  notes      text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
-drop trigger if exists trg_agencies_updated_at on public.agencies;
-create trigger trg_agencies_updated_at before update on public.agencies
-  for each row execute function public.set_updated_at();
+-- Assets (the vehicles we service) --------------------------------------------
+create table if not exists assets (
+  id            uuid primary key default gen_random_uuid(),
+  client_id     uuid references clients (id) on delete set null,
+  asset_type    text not null default 'vehicle',
+  vin           text,
+  year          integer,
+  make          text,
+  model         text,
+  trim          text,
+  color         text,
+  mileage       integer,
+  license_plate text,
+  notes         text,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
 
-drop trigger if exists trg_talent_updated_at on public.talent;
-create trigger trg_talent_updated_at before update on public.talent
-  for each row execute function public.set_updated_at();
+-- Jobs (a unit of work for a client on an asset) ------------------------------
+create table if not exists jobs (
+  id                uuid primary key default gen_random_uuid(),
+  client_id         uuid not null references clients (id) on delete cascade,
+  asset_id          uuid references assets (id) on delete set null,
+  assigned_staff_id uuid references staff (id) on delete set null,
+  service_type      service_type not null,
+  status            job_status not null default 'requested',
+  scheduled_date    date,
+  completed_date    date,
+  location          text,
+  notes             text,
+  summary           text,
+  cover_photo_url   text,
+  is_shareable      boolean not null default false,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
 
-drop trigger if exists trg_people_updated_at on public.people;
-create trigger trg_people_updated_at before update on public.people
-  for each row execute function public.set_updated_at();
+create table if not exists job_pricing (
+  job_id     uuid primary key references jobs (id) on delete cascade,
+  price      numeric,
+  cost       numeric,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
-drop trigger if exists trg_deals_updated_at on public.deals;
-create trigger trg_deals_updated_at before update on public.deals
-  for each row execute function public.set_updated_at();
+create table if not exists condition_reports (
+  id              uuid primary key default gen_random_uuid(),
+  job_id          uuid not null unique references jobs (id) on delete cascade,
+  asset_id        uuid references assets (id) on delete set null,
+  overall_grade   text,
+  mileage         integer,
+  exterior_notes  text,
+  interior_notes  text,
+  mechanical_notes text,
+  findings        jsonb not null default '[]'::jsonb,
+  photos          jsonb not null default '[]'::jsonb,
+  inspected_by    uuid references staff (id) on delete set null,
+  inspected_at    timestamptz,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
 
-drop trigger if exists trg_deal_budgets_updated_at on public.deal_budgets;
-create trigger trg_deal_budgets_updated_at before update on public.deal_budgets
-  for each row execute function public.set_updated_at();
+-- Inbound leads (public "request service" form) -------------------------------
+create table if not exists leads (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null,
+  email        text not null,
+  phone        text,
+  company      text,
+  service_type text,
+  message      text,
+  source       text not null default 'website',
+  created_at   timestamptz not null default now()
+);
 
--- -----------------------------------------------------------------------------
--- Indexes for the join + derived-field queries.
--- -----------------------------------------------------------------------------
-create index if not exists idx_deals_brand_id     on public.deals(brand_id);
-create index if not exists idx_deals_talent_id    on public.deals(talent_id);
-create index if not exists idx_deals_booking_date on public.deals(booking_date desc);
-create index if not exists idx_people_brand_id    on public.people(brand_id);
-create index if not exists idx_people_agency_id   on public.people(agency_id);
+-- Indexes ---------------------------------------------------------------------
+create index if not exists contacts_client_id_idx  on contacts (client_id);
+create index if not exists assets_client_id_idx     on assets (client_id);
+create index if not exists jobs_client_id_idx        on jobs (client_id);
+create index if not exists jobs_status_idx           on jobs (status);
+create index if not exists jobs_assigned_staff_idx   on jobs (assigned_staff_id);
+
+-- updated_at triggers ---------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array['profiles','clients','contacts','staff','assets','jobs','job_pricing','condition_reports']
+  loop
+    execute format('drop trigger if exists set_updated_at on %I', t);
+    execute format('create trigger set_updated_at before update on %I for each row execute function set_updated_at()', t);
+  end loop;
+end $$;

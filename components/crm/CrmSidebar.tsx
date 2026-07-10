@@ -3,19 +3,10 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { CrmNav } from './CrmNav';
-import { TulipMark } from '../TulipMark';
 
 // CRM sidebar: a static left column on desktop, and a hamburger-triggered drawer
-// on mobile. On mobile the period filter sits inline in the single top bar and
-// the account actions (role, Google, sign out) tuck into the dropdown, so there
-// is exactly one header bar instead of two stacked ones.
-export function CrmSidebar({
-  period,
-  menuExtras,
-}: {
-  period?: React.ReactNode;
-  menuExtras?: React.ReactNode;
-}) {
+// on mobile. Account actions (role, sign out) tuck into the dropdown on mobile.
+export function CrmSidebar({ menuExtras }: { menuExtras?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
 
   const logo = (
@@ -24,8 +15,7 @@ export function CrmSidebar({
       onClick={() => setOpen(false)}
       className="flex items-center gap-2 px-2 font-display text-xl"
     >
-      <TulipMark className="h-5 w-5 text-tulip" />
-      Tulips<span className="text-tulip">.</span>{' '}
+      PDS Logix<span className="text-tulip">.</span>{' '}
       <span className="font-sans text-sm text-stone">CRM</span>
     </Link>
   );
@@ -36,28 +26,25 @@ export function CrmSidebar({
       <div className="relative z-50 md:hidden">
         <div className="flex items-center justify-between gap-2 border-b border-line bg-ivory px-4 py-3">
           {logo}
-          <div className="flex items-center gap-2">
-            {period}
-            <button
-              onClick={() => setOpen((v) => !v)}
-              aria-label={open ? 'Close menu' : 'Open menu'}
-              aria-expanded={open}
-              className="rounded-lg p-1.5 text-ink hover:bg-blush/60"
-            >
-              {open ? (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              ) : (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="3" y1="6" x2="21" y2="6" />
-                  <line x1="3" y1="12" x2="21" y2="12" />
-                  <line x1="3" y1="18" x2="21" y2="18" />
-                </svg>
-              )}
-            </button>
-          </div>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
+            className="rounded-lg p-1.5 text-ink hover:bg-blush/60"
+          >
+            {open ? (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            ) : (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            )}
+          </button>
         </div>
         {open && (
           <>

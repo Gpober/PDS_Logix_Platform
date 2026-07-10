@@ -1,7 +1,8 @@
-export type DealStatus = 'pitched' | 'confirmed' | 'live' | 'completed';
-export type Role = 'owner' | 'admin' | 'member' | 'talent';
+// Domain types for the PDS Logix CRM — a vehicle field-service business
+// (condition-report inspections, detailing, biohazard remediation). These mirror
+// the Supabase schema exactly; every read/write runs under the caller's RLS.
 
-export const DEAL_STATUSES: DealStatus[] = ['pitched', 'confirmed', 'live', 'completed'];
+export type Role = 'owner' | 'admin' | 'member';
 
 export interface Profile {
   id: string;
@@ -10,140 +11,143 @@ export interface Profile {
   role: Role;
 }
 
-export type CompanyType = 'brand' | 'agency' | 'other';
-export type CompanyStatus = 'active' | 'prospect' | 'inactive';
-
-export const COMPANY_TYPES: CompanyType[] = ['brand', 'agency', 'other'];
-export const COMPANY_STATUSES: CompanyStatus[] = ['active', 'prospect', 'inactive'];
-
-export interface Company {
+export interface Client {
   id: string;
   name: string;
-  type: CompanyType;
   category: string | null;
-  employee_count: number | null;
   website: string | null;
-  notes: string | null;
-  status: CompanyStatus;
-  logo_url: string | null;
-  is_public: boolean;
-}
-
-// Row from the company_overview view: a company plus its live-computed booking
-// fields and a contact tally.
-export interface CompanyOverview {
-  id: string;
-  name: string;
-  type: CompanyType;
-  category: string | null;
-  employee_count: number | null;
-  website: string | null;
-  status: CompanyStatus;
-  logo_url: string | null;
-  is_public: boolean;
-  date_last_booked: string | null;
-  latest_live_url: string | null;
-  deal_count: number;
-  contact_count: number;
-}
-
-// A person who works at a company (lives inside the company detail page).
-export interface Contact {
-  id: string;
-  company_id: string;
-  name: string;
-  email: string | null;
+  billing_email: string | null;
   phone: string | null;
-  title: string | null;
-  is_primary: boolean;
-}
-
-export interface Talent {
-  id: string;
-  name: string;
-  handle: string | null;
-  category: string | null;
+  address: string | null;
   notes: string | null;
-  headshot_url: string | null;
-  asana_project_gid: string | null;
-  user_id: string | null;
-  // Public-site publishing controls
-  slug: string | null;
-  bio: string | null;
+  logo_url: string | null;
   is_public: boolean;
-  is_featured: boolean;
-  audience_stats: { instagram?: number; tiktok?: number; youtube?: number } | null;
-  // Talent's payout cut as a percentage (e.g. 80 = 80%). Used when billing a
-  // deal to compute the talent's QBO bill; blank falls back to I AM CFO's default.
-  payout_pct: number | null;
-}
-
-// Distinct talent a company has worked with (from the company_talent view).
-export interface CompanyTalent {
-  company_id: string;
-  talent_id: string;
-  talent_name: string;
-  talent_handle: string | null;
-  talent_category: string | null;
-}
-
-export type DealChannel = 'inbound' | 'outbound';
-export const DEAL_CHANNELS: DealChannel[] = ['inbound', 'outbound'];
-
-export interface DealWithBudget {
-  id: string;
-  company_id: string;
-  talent_id: string;
-  booking_date: string | null;
-  status: DealStatus;
-  live_url: string | null;
-  notes: string | null;
-  budget: number | null;
-  invoice_number: string | null;
-  channel: DealChannel | null;
-  source: string | null;
-}
-
-export interface AgencySettings {
-  monthly_target: number | null;
-  annual_goal: number | null;
-  default_agency_pct: number;
-}
-
-export type MemoryCategory = 'business' | 'talent' | 'brand' | 'preference' | 'general';
-export const MEMORY_CATEGORIES: MemoryCategory[] = ['business', 'talent', 'brand', 'preference', 'general'];
-
-// A durable fact Zordon carries across sessions — loaded into her prompt.
-export interface AssistantMemory {
-  id: string;
-  created_by: string | null;
-  content: string;
-  category: MemoryCategory;
-  subject: string | null;
-  talent_id: string | null;
-  company_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export type DraftKind = 'pitch' | 'follow_up' | 'reply' | 'other';
-export const DRAFT_KINDS: DraftKind[] = ['pitch', 'follow_up', 'reply', 'other'];
-
-// An outreach email Zordon composed. Draft only — nothing is sent from here; a
-// human reviews it and sends from their own mail. `status` reserves room for a
-// future gated "sent" transition.
-export interface AssistantDraft {
+export interface Contact {
   id: string;
-  created_by: string | null;
-  kind: DraftKind;
-  to_name: string | null;
-  to_email: string | null;
-  subject: string;
-  body: string;
-  lead_id: string | null;
-  talent_id: string | null;
-  company_id: string | null;
-  status: 'draft' | 'sent' | 'archived';
+  name: string;
+  email: string | null;
+  phone: string | null;
+  title: string | null;
+  client_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Staff {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  title: string | null;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AssetType = 'vehicle' | string;
+
+export interface Asset {
+  id: string;
+  client_id: string | null;
+  asset_type: AssetType;
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  trim: string | null;
+  color: string | null;
+  mileage: number | null;
+  license_plate: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ServiceType = 'condition_report' | 'detailing' | 'biohazard';
+export type JobStatus = 'requested' | 'scheduled' | 'in_progress' | 'completed' | 'invoiced';
+
+export const SERVICE_TYPES: ServiceType[] = ['condition_report', 'detailing', 'biohazard'];
+export const JOB_STATUSES: JobStatus[] = [
+  'requested',
+  'scheduled',
+  'in_progress',
+  'completed',
+  'invoiced',
+];
+
+export const SERVICE_LABELS: Record<ServiceType, string> = {
+  condition_report: 'Condition Report',
+  detailing: 'Detailing',
+  biohazard: 'Biohazard',
+};
+
+export const STATUS_LABELS: Record<JobStatus, string> = {
+  requested: 'Requested',
+  scheduled: 'Scheduled',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  invoiced: 'Invoiced',
+};
+
+export interface Job {
+  id: string;
+  client_id: string;
+  asset_id: string | null;
+  assigned_staff_id: string | null;
+  service_type: ServiceType;
+  status: JobStatus;
+  scheduled_date: string | null;
+  completed_date: string | null;
+  location: string | null;
+  notes: string | null;
+  summary: string | null;
+  cover_photo_url: string | null;
+  is_shareable: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobPricing {
+  job_id: string;
+  price: number | null;
+  cost: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// A job joined to the names/labels a list view needs.
+export interface JobWithRelations extends Job {
+  client_name: string | null;
+  staff_name: string | null;
+  asset_label: string | null;
+  price: number | null;
+  cost: number | null;
+}
+
+export interface ConditionFinding {
+  area?: string;
+  severity?: string;
+  note?: string;
+}
+
+export interface ConditionReport {
+  id: string;
+  job_id: string;
+  asset_id: string | null;
+  overall_grade: string | null;
+  mileage: number | null;
+  exterior_notes: string | null;
+  interior_notes: string | null;
+  mechanical_notes: string | null;
+  findings: ConditionFinding[];
+  photos: string[];
+  inspected_by: string | null;
+  inspected_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -152,16 +156,16 @@ export interface Lead {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   company: string | null;
+  service_type: string | null;
   message: string | null;
-  talent_of_interest: string | null;
   source: string;
   created_at: string;
-  owner: string | null;
-  last_pitch_on: string | null;
-  last_pitch_text: string | null;
-  next_eligible_on: string | null;
-  next_eligible_text: string | null;
-  history: string | null;
-  fit: string | null;
+}
+
+// Helper: a human label for an asset (e.g. "2021 Toyota Camry").
+export function assetLabel(a: Pick<Asset, 'year' | 'make' | 'model' | 'vin'>): string {
+  const parts = [a.year, a.make, a.model].filter(Boolean).join(' ').trim();
+  return parts || a.vin || 'Asset';
 }
