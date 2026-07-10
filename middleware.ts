@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/supabase/config';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -46,20 +47,17 @@ export async function middleware(request: NextRequest) {
 
   let response = NextResponse.next({ request });
 
-  // Fail open when Supabase isn't configured yet. Without these env vars,
-  // createServerClient() throws (invalid URL) and — because this middleware runs
-  // on nearly every route — would 500 the entire site (MIDDLEWARE_INVOCATION_FAILED).
-  // Skipping auth here lets the public pages render; /crm + /portal simply can't
-  // be gated until the keys are set in the environment.
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) {
+  // Fail open if Supabase somehow isn't configured (SUPABASE_URL/ANON_KEY carry a
+  // committed default for the PDS Logix CRM project, so this normally holds).
+  // Guarding keeps a missing/blank override from 500-ing the whole site via the
+  // middleware (MIDDLEWARE_INVOCATION_FAILED).
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     return response;
   }
 
   const supabase = createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
