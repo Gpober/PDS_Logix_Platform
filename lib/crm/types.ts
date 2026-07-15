@@ -22,6 +22,7 @@ export interface Client {
   notes: string | null;
   logo_url: string | null;
   is_public: boolean;
+  qbo_customer_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -108,6 +109,10 @@ export interface Job {
   summary: string | null;
   cover_photo_url: string | null;
   is_shareable: boolean;
+  qbo_invoice_id: string | null;
+  qbo_invoice_status: string | null;
+  qbo_balance: number | null;
+  qbo_synced_at: string | null;
   created_at: string;
   updated_at: string;
 }

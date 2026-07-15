@@ -12,6 +12,7 @@ const tabs = [
   { href: '/crm/assets', label: 'Assets' },
   { href: '/crm/jobs', label: 'Jobs' },
   { href: '/crm/leads', label: 'Leads' },
+  { href: '/crm/settings', label: 'Settings' },
 ];
 
 export function CrmNav({ onNavigate }: { onNavigate?: () => void }) {

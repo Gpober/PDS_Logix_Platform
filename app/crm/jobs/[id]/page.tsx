@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getJob, getConditionReport } from '@/lib/crm/data';
 import { setJobStatus, deleteJob } from '@/lib/crm/actions';
+import { sendJobToQuickBooks, refreshJobFromQuickBooks } from '@/lib/crm/qbo';
+import { qboConfigured, isConnected as qboIsConnected } from '@/lib/integrations/quickbooks';
 import {
   JOB_STATUSES,
   STATUS_LABELS,
@@ -28,6 +30,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   if (!job) notFound();
   const report = await getConditionReport(id);
   const margin = job.price !== null && job.cost !== null ? job.price - job.cost : null;
+  const qboReady = qboConfigured() && (await qboIsConnected());
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -96,6 +99,44 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         <p className="mt-4 rounded-2xl border border-line bg-white p-5 text-sm whitespace-pre-wrap">
           {job.notes}
         </p>
+      )}
+
+      {/* QuickBooks */}
+      <h2 className="mb-3 mt-8 font-display text-xl">QuickBooks</h2>
+      {!qboConfigured() ? (
+        <Empty>QuickBooks isn’t configured yet. Add the Intuit API credentials to switch it on.</Empty>
+      ) : !qboReady ? (
+        <div className="rounded-2xl border border-line bg-white p-5 text-sm">
+          QuickBooks isn’t connected.{' '}
+          <Link href="/crm/settings" className="text-tulip hover:underline">
+            Connect it in Settings
+          </Link>{' '}
+          to send invoices.
+        </div>
+      ) : job.qbo_invoice_id ? (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-line bg-white p-5">
+          <Detail label="QBO invoice" value={`#${job.qbo_invoice_id}`} />
+          <Detail label="Payment status" value={job.qbo_invoice_status ?? '—'} />
+          <Detail label="Balance due" value={formatUSD(job.qbo_balance)} />
+          <Detail label="Last synced" value={formatDate(job.qbo_synced_at)} />
+          <form action={refreshJobFromQuickBooks.bind(null, id)}>
+            <button className="rounded-full border border-line px-4 py-2 text-sm hover:border-ink">
+              Refresh status
+            </button>
+          </form>
+        </div>
+      ) : (
+        <form
+          action={sendJobToQuickBooks.bind(null, id)}
+          className="flex items-center gap-3 rounded-2xl border border-line bg-white p-5"
+        >
+          <button className="rounded-full bg-ink px-5 py-2.5 text-sm text-ivory hover:bg-tulip">
+            Send to QuickBooks
+          </button>
+          <span className="text-sm text-stone">
+            Creates a QBO customer (if needed) and an invoice for {formatUSD(job.price)}.
+          </span>
+        </form>
       )}
 
       {/* Condition report (for inspection jobs) */}
