@@ -267,6 +267,42 @@ export async function deleteJob(id: string) {
   redirect('/crm/jobs');
 }
 
+// ---- Time tracking ---------------------------------------------------------
+
+export async function clockIn(form: FormData) {
+  const supabase = await createServerSupabase();
+  const staffId = str(form, 'staff_id');
+  if (!staffId) throw new Error('Pick a staff member to clock in.');
+  const { error } = await supabase.from('time_entries').insert({
+    staff_id: staffId,
+    job_id: str(form, 'job_id'),
+  });
+  if (error) {
+    // The partial unique index blocks a second open entry for the same person.
+    if (error.code === '23505') throw new Error('That staff member is already clocked in.');
+    throw new Error(error.message);
+  }
+  revalidatePath('/crm/time');
+}
+
+export async function clockOut(entryId: string) {
+  const supabase = await createServerSupabase();
+  const { error } = await supabase
+    .from('time_entries')
+    .update({ clock_out: new Date().toISOString() })
+    .eq('id', entryId)
+    .is('clock_out', null);
+  if (error) throw new Error(error.message);
+  revalidatePath('/crm/time');
+}
+
+export async function deleteTimeEntry(entryId: string) {
+  const supabase = await createServerSupabase();
+  const { error } = await supabase.from('time_entries').delete().eq('id', entryId);
+  if (error) throw new Error(error.message);
+  revalidatePath('/crm/time');
+}
+
 // ---- Leads -----------------------------------------------------------------
 
 export async function deleteLead(id: string) {

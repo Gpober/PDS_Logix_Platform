@@ -169,6 +169,23 @@ export interface Lead {
   created_at: string;
 }
 
+export interface TimeEntry {
+  id: string;
+  staff_id: string;
+  job_id: string | null;
+  clock_in: string;
+  clock_out: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimeEntryWithRelations extends TimeEntry {
+  staff_name: string | null;
+  job_label: string | null;
+  duration_ms: number | null; // null while still clocked in
+}
+
 // Helper: a human label for an asset (e.g. "2021 Toyota Camry").
 export function assetLabel(a: Pick<Asset, 'year' | 'make' | 'model' | 'vin'>): string {
   const parts = [a.year, a.make, a.model].filter(Boolean).join(' ').trim();
