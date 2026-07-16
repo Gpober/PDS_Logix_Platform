@@ -1,6 +1,7 @@
 import { createServerSupabase } from '@/lib/supabase/server';
 import {
   assetLabel,
+  SERVICE_LABELS,
   type Asset,
   type Client,
   type Contact,
@@ -11,7 +12,9 @@ import {
   type JobWithRelations,
   type Lead,
   type Profile,
+  type ServiceType,
   type Staff,
+  type TimeEntryWithRelations,
 } from './types';
 
 // All reads use the request-scoped server client, so RLS runs as the logged-in
@@ -217,6 +220,66 @@ export async function getLead(id: string): Promise<Lead | null> {
   const supabase = await createServerSupabase();
   const { data } = await supabase.from('leads').select('*').eq('id', id).maybeSingle();
   return (data as Lead) ?? null;
+}
+
+// ---- Time tracking ---------------------------------------------------------
+
+interface TimeEntryRow {
+  id: string;
+  staff_id: string;
+  job_id: string | null;
+  clock_in: string;
+  clock_out: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  staff: { name: string } | null;
+  jobs: { service_type: ServiceType; clients: { name: string } | null } | null;
+}
+
+function shapeEntry(row: TimeEntryRow): TimeEntryWithRelations {
+  const jobLabel = row.jobs
+    ? [SERVICE_LABELS[row.jobs.service_type], row.jobs.clients?.name].filter(Boolean).join(' · ')
+    : null;
+  const duration = row.clock_out
+    ? new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime()
+    : null;
+  return {
+    id: row.id,
+    staff_id: row.staff_id,
+    job_id: row.job_id,
+    clock_in: row.clock_in,
+    clock_out: row.clock_out,
+    notes: row.notes,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    staff_name: row.staff?.name ?? null,
+    job_label: jobLabel,
+    duration_ms: duration,
+  };
+}
+
+const TIME_SELECT = '*, staff(name), jobs(service_type, clients(name))';
+
+// Everyone currently clocked in (no clock_out), oldest first.
+export async function getOpenTimeEntries(): Promise<TimeEntryWithRelations[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from('time_entries')
+    .select(TIME_SELECT)
+    .is('clock_out', null)
+    .order('clock_in', { ascending: true });
+  return ((data as TimeEntryRow[]) ?? []).map(shapeEntry);
+}
+
+export async function getRecentTimeEntries(limit = 100): Promise<TimeEntryWithRelations[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from('time_entries')
+    .select(TIME_SELECT)
+    .order('clock_in', { ascending: false })
+    .limit(limit);
+  return ((data as TimeEntryRow[]) ?? []).map(shapeEntry);
 }
 
 // ---- Dashboard -------------------------------------------------------------
