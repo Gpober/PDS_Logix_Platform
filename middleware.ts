@@ -1,8 +1,17 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/supabase/config';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
+
+// Supabase connection, inlined here (NOT imported from lib/supabase/config) so the
+// Edge middleware bundle stays self-contained — importing a module shared with the
+// server-only clients drags Node-only code into the Edge Runtime and blocks deploy.
+// The URL + anon key are public by design (RLS governs access); env overrides them.
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://xqyxpefsukilkqevspfv.supabase.co';
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhxeXhwZWZzdWtpbGtxZXZzcGZ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5NDg4ODQsImV4cCI6MjA5ODUyNDg4NH0.WDxOEbDew6AsMehppbKjBhlEkWZsKdG1mYgKrAETyuQ';
 
 // Refreshes the Supabase session cookie on every request and guards /crm.
 export async function middleware(request: NextRequest) {
