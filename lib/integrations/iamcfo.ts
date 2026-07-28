@@ -203,3 +203,62 @@ export async function iamcfoConnected(): Promise<boolean> {
   const res = await getInvoices({ limit: 1 });
   return res.status === 'ok';
 }
+
+// ---- Books: financials, cash calendar, refresh ----------------------------
+// The books I AM CFO keeps for PDS (Pride Dealer Services), read live through
+// the one canonical QBO connection. These feed Zordon's financial reports.
+
+export interface Financials {
+  orgName: string;
+  period: string; // "YYYY-MM"
+  currency: string;
+  profitAndLoss: { revenue: number; expenses: number; netIncome: number; netMargin: number };
+  cash: { balance: number; runwayMonths: number };
+  receivables: { total: number; pastDue: number };
+  payables: { total: number };
+  generatedAt: string;
+}
+
+// P&L (revenue / expenses / net income / margin), cash + runway, A/R (incl.
+// past due) and A/P — scoped to from/to when given, else the current month.
+export async function getFinancials(range?: { from?: string; to?: string }): Promise<Result<Financials>> {
+  const p = new URLSearchParams();
+  if (range?.from) p.set('from', range.from);
+  if (range?.to) p.set('to', range.to);
+  const qs = p.toString();
+  return request('GET', `/api/partner/financials${qs ? `?${qs}` : ''}`);
+}
+
+export interface CashEvent {
+  date: string;
+  type: 'inflow' | 'outflow';
+  name: string;
+  amount: number;
+  source: 'ar' | 'ap';
+  status: 'due' | 'paid';
+  reference?: string | null;
+  dueDate?: string | null;
+}
+export interface CashCalendar {
+  orgName: string | null;
+  from: string;
+  to: string;
+  currency: string;
+  events: CashEvent[];
+}
+
+// Dated money-in (received), money-due (open A/R with real due dates) and
+// money-out (A/P), for a period. Defaults to the current month.
+export async function getCashCalendar(range?: { from?: string; to?: string }): Promise<Result<CashCalendar>> {
+  const p = new URLSearchParams();
+  if (range?.from) p.set('from', range.from);
+  if (range?.to) p.set('to', range.to);
+  const qs = p.toString();
+  return request('GET', `/api/partner/cash-calendar${qs ? `?${qs}` : ''}`);
+}
+
+// Ask I AM CFO to re-pull QuickBooks (journal lines + A/R + A/P) into the mirror
+// the books read from — so a report reflects the latest QBO data.
+export async function refreshBooks(): Promise<Result<{ ok?: boolean; syncedLines?: number }>> {
+  return request('POST', '/api/partner/refresh-qbo');
+}

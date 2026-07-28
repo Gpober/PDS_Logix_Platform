@@ -29,7 +29,14 @@ import {
   type MemoryCategory,
   type ServiceType,
 } from '@/lib/crm/types';
-import { getBills, getDuplicateInvoices, getInvoices } from '@/lib/integrations/iamcfo';
+import {
+  getBills,
+  getCashCalendar,
+  getDuplicateInvoices,
+  getFinancials,
+  getInvoices,
+  refreshBooks,
+} from '@/lib/integrations/iamcfo';
 import { runSpecialist, SPECIALIST_KEYS } from './specialists';
 import { BUILD_REPORT_INPUT_SCHEMA, normalizeReportInput } from './reportBlocks';
 
@@ -211,6 +218,36 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
     name: 'find_duplicate_invoices',
     description:
       'READ-ONLY: find invoice numbers that appear more than once in QuickBooks (accidental duplicates). Returns each duplicated number with its invoices (id, customer, amount, date, paid). To remove them, propose delete_invoices with the EXTRA copies — a paid invoice is never deleted.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'financials',
+    description:
+      "The company's real books from QuickBooks (the accounting source of truth): profit & loss (revenue, expenses, net income, net margin), cash on hand + runway (months), receivables (total + past due), and payables. Use for 'what's our P&L', 'how's our margin', 'how much cash / runway', 'how are the books', or to lead a financial report. Scope to a period with from/to (YYYY-MM-DD); omit for the current month. Pair with cash_calendar for dated money in/out and job_analytics for the operational side. You read and explain the books here — you can post invoices/bills (gated) but not journal entries.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Period start YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'Period end YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'cash_calendar',
+    description:
+      "Dated cash flow from the books: money-in (received), money-due (open receivables with real due dates), and money-out (payables), plus a net position for the period. Use for cash-flow questions — what's coming in, who owes us and when, what we owe out. Defaults to the current month; scope with from/to (YYYY-MM-DD).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start date YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'End date YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'refresh_books',
+    description:
+      "Re-pull the latest QuickBooks data (journal lines + A/R + A/P) into the books mirror, so financials/cash_calendar reflect the most current numbers. Use when the user says the books look stale or explicitly asks to refresh/sync from QuickBooks. Can take a few seconds; then re-read financials.",
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -482,6 +519,9 @@ export const TOOL_LABELS: Record<string, string> = {
   get_invoices: 'Reading invoices',
   get_bills: 'Reading bills',
   find_duplicate_invoices: 'Finding duplicate invoices',
+  financials: 'Reading the books',
+  cash_calendar: 'Reading the cash calendar',
+  refresh_books: 'Refreshing from QuickBooks',
   save_draft: 'Saving a draft',
   remember: 'Saving to memory',
   build_report: 'Building a report',
@@ -598,6 +638,61 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
       return number ? { found: d.found ?? false, bill: d.bill ?? null } : { count: d.count ?? 0, bills: d.bills ?? [] };
+    }
+
+    case 'financials': {
+      const from = typeof input.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.from) ? input.from : undefined;
+      const to = typeof input.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.to) ? input.to : undefined;
+      const res = await getFinancials({ from, to });
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      return {
+        period: d.period,
+        currency: d.currency,
+        profit_and_loss: {
+          revenue: d.profitAndLoss?.revenue,
+          expenses: d.profitAndLoss?.expenses,
+          net_income: d.profitAndLoss?.netIncome,
+          net_margin_pct: d.profitAndLoss?.netMargin != null ? Math.round(d.profitAndLoss.netMargin * 10) / 10 : null,
+        },
+        cash: { balance: d.cash?.balance, runway_months: d.cash?.runwayMonths },
+        receivables: { total: d.receivables?.total, past_due: d.receivables?.pastDue },
+        payables: { total: d.payables?.total },
+        source: 'QuickBooks via I AM CFO (books of record)',
+      };
+    }
+
+    case 'cash_calendar': {
+      const isDay = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const res = await getCashCalendar({ from: isDay(input.from) ? input.from : undefined, to: isDay(input.to) ? input.to : undefined });
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const events = res.data.events ?? [];
+      let received = 0, dueIn = 0, owedOut = 0;
+      for (const e of events) {
+        if (e.source === 'ar') e.status === 'paid' ? (received += e.amount) : (dueIn += e.amount);
+        else owedOut += e.amount;
+      }
+      const trim = (pred: (e: (typeof events)[number]) => boolean) =>
+        events.filter(pred).sort((a, b) => b.amount - a.amount).slice(0, 30)
+          .map((e) => ({ date: e.date, name: e.name, amount: e.amount, due_date: e.dueDate ?? null, reference: e.reference ?? null }));
+      return {
+        from: res.data.from,
+        to: res.data.to,
+        summary: { received, due_in: dueIn, owed_out: owedOut, net_expected: received + dueIn - owedOut },
+        due_receivables: trim((e) => e.source === 'ar' && e.status === 'due'),
+        received_payments: trim((e) => e.source === 'ar' && e.status === 'paid'),
+        payables_out: trim((e) => e.source === 'ap'),
+        event_count: events.length,
+      };
+    }
+
+    case 'refresh_books': {
+      const res = await refreshBooks();
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      return { refreshed: true, synced_lines: res.data.syncedLines ?? null, message: 'Pulled the latest from QuickBooks. Re-read financials for current numbers.' };
     }
 
     case 'find_duplicate_invoices': {
