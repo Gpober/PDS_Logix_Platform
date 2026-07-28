@@ -12,6 +12,8 @@ interface PendingAction {
 }
 
 type ImportRow = { company: string; name?: string; title?: string; email?: string; phone?: string };
+type StaffRow = { name: string; title?: string; email?: string; phone?: string; active?: boolean };
+type TimeRow = { employee: string; date?: string; clock_in?: string; clock_out?: string; hours?: string; notes?: string };
 
 interface Attachment {
   url: string; // data URL (empty for text files)
@@ -19,6 +21,8 @@ interface Attachment {
   kind: 'image' | 'pdf' | 'text';
   text?: string; // preview shown to the model for CSV / text files
   contacts?: ImportRow[]; // full rows parsed in the browser (for import_contacts)
+  staff?: StaffRow[]; // parsed team/people rows (for import_staff)
+  timeEntries?: TimeRow[]; // parsed time-clock rows (for import_time)
 }
 
 interface Msg {
@@ -70,6 +74,8 @@ const TOOL_LABELS: Record<string, string> = {
   update_invoice: 'Preparing an invoice fix',
   delete_invoices: 'Preparing an invoice cleanup',
   import_contacts: 'Preparing a contact import',
+  import_staff: 'Preparing a team import',
+  import_time: 'Preparing an hours import',
 };
 const labelFor = (name: string) => TOOL_LABELS[name] ?? name;
 
@@ -163,6 +169,115 @@ function contactsPreview(fileName: string, rows: ImportRow[]): string {
   );
 }
 
+// ---- Connecteam team & time-clock imports ----------------------------------
+// A people export → staff rows; a time-clock export → time rows. Detected by
+// their headers so a Connecteam CSV drops straight in. Column names vary by
+// account, so the matchers are generous.
+
+type StaffKey = 'name' | 'first' | 'last' | 'title' | 'email' | 'phone' | 'active';
+const STAFF_HEADERS: { key: StaffKey; re: RegExp }[] = [
+  { key: 'first', re: /^first\s*name$/i },
+  { key: 'last', re: /^last\s*name$/i },
+  { key: 'email', re: /e-?mail/i },
+  { key: 'phone', re: /(phone|mobile|^tel$|cell)/i },
+  { key: 'title', re: /(job\s*title|title|role|position|user\s*type|department|team)/i },
+  { key: 'active', re: /(archived|active|status|employment)/i },
+  { key: 'name', re: /(full\s*name|display\s*name|employee\s*name|^employee$|^name$|^user$|member)/i },
+];
+
+type TimeKey = 'employee' | 'date' | 'clock_in' | 'clock_out' | 'hours' | 'notes';
+const TIME_HEADERS: { key: TimeKey; re: RegExp }[] = [
+  { key: 'clock_in', re: /(clock\s*in|start\s*time|shift\s*start|check\s*in|^in$|^start$)/i },
+  { key: 'clock_out', re: /(clock\s*out|end\s*time|shift\s*end|check\s*out|^out$|^end$)/i },
+  { key: 'hours', re: /(total\s*hours|worked\s*hours|duration|^hours$|^total$|^worked$)/i },
+  { key: 'date', re: /(shift\s*date|^date$|^day$)/i },
+  { key: 'notes', re: /(job|task|shift\s*title|note|description|^type$)/i },
+  { key: 'employee', re: /(employee|full\s*name|^name$|^user$|member|staff)/i },
+];
+
+function mapWith<K extends string>(header: string[], defs: { key: K; re: RegExp }[]): (K | null)[] {
+  return header.map((h) => {
+    const n = h.trim();
+    for (const { key, re } of defs) if (re.test(n)) return key;
+    return null;
+  });
+}
+
+function parseStaffCsv(text: string, fileName: string): StaffRow[] | null {
+  const first = text.split('\n', 1)[0] ?? '';
+  const delim = /\.tsv$/i.test(fileName) || (first.includes('\t') && !first.includes(',')) ? '\t' : ',';
+  const grid = parseDelimited(text, delim);
+  if (grid.length < 2) return null;
+  const cols = mapWith(grid[0], STAFF_HEADERS);
+  const has = (k: StaffKey) => cols.includes(k);
+  const hasCompany = grid[0].some((h) => /^(client|company|dealer|fleet|insurer|account|organization|org)$/i.test(h.trim()));
+  const hasTime = cols.some((c) => c === null) && grid[0].some((h) => /(clock|shift|duration|hours|start\s*time|end\s*time)/i.test(h.trim()));
+  const hasName = has('name') || (has('first') && has('last')) || has('first');
+  const peopleSignal = has('title') || has('active') || has('first') || has('last');
+  // A team roster: names + an employee signal, and NOT a client-contacts or time sheet.
+  if (!hasName || !peopleSignal || hasCompany || hasTime) return null;
+
+  const out: StaffRow[] = [];
+  for (let i = 1; i < grid.length && out.length < 5000; i++) {
+    const cells = grid[i];
+    const get = (k: StaffKey) => { const idx = cols.indexOf(k); return idx >= 0 ? (cells[idx] ?? '').trim().replace(/[<>]/g, '') : ''; };
+    let name = get('name');
+    if (!name) name = [get('first'), get('last')].filter(Boolean).join(' ').trim();
+    if (!name) continue;
+    const statusRaw = get('active').toLowerCase();
+    const active = statusRaw ? !/(archived|inactive|terminated|disabled|no|false|0)/.test(statusRaw) : true;
+    out.push({ name, title: get('title') || undefined, email: get('email') || undefined, phone: get('phone') || undefined, active });
+  }
+  return out.length ? out : null;
+}
+
+function parseTimeCsv(text: string, fileName: string): TimeRow[] | null {
+  const first = text.split('\n', 1)[0] ?? '';
+  const delim = /\.tsv$/i.test(fileName) || (first.includes('\t') && !first.includes(',')) ? '\t' : ',';
+  const grid = parseDelimited(text, delim);
+  if (grid.length < 2) return null;
+  const cols = mapWith(grid[0], TIME_HEADERS);
+  const has = (k: TimeKey) => cols.includes(k);
+  // A time sheet needs an employee column and a real time signal (in/out or hours).
+  if (!has('employee') || !(has('clock_in') || has('clock_out') || has('hours'))) return null;
+
+  const out: TimeRow[] = [];
+  for (let i = 1; i < grid.length && out.length < 10000; i++) {
+    const cells = grid[i];
+    const get = (k: TimeKey) => { const idx = cols.indexOf(k); return idx >= 0 ? (cells[idx] ?? '').trim() : ''; };
+    const employee = get('employee').replace(/[<>]/g, '');
+    if (!employee) continue;
+    out.push({
+      employee,
+      date: get('date') || undefined,
+      clock_in: get('clock_in') || undefined,
+      clock_out: get('clock_out') || undefined,
+      hours: get('hours') || undefined,
+      notes: get('notes') || undefined,
+    });
+  }
+  return out.length ? out : null;
+}
+
+function staffPreview(fileName: string, rows: StaffRow[]): string {
+  const head = rows.slice(0, 12).map((r) => `${r.name}${r.title ? ` · ${r.title}` : ''}${r.email ? ` · ${r.email}` : ''}`).join('\n');
+  return (
+    `[Attached team sheet: ${fileName}] — ${rows.length} people parsed (Name / Title / Email / Phone). ` +
+    `The app holds the full parsed rows; propose import_staff with an EMPTY staff array and the app injects every row. ` +
+    `Idempotent — only new people get added. Preview (first 12 of ${rows.length}):\n${head}`
+  );
+}
+
+function timePreview(fileName: string, rows: TimeRow[]): string {
+  const head = rows.slice(0, 12).map((r) => `${r.employee}${r.date ? ` · ${r.date}` : ''}${r.clock_in ? ` · ${r.clock_in}` : ''}${r.clock_out ? `–${r.clock_out}` : ''}${r.hours ? ` · ${r.hours}h` : ''}`).join('\n');
+  return (
+    `[Attached time sheet: ${fileName}] — ${rows.length} shifts parsed (Employee / Date / In / Out / Hours). ` +
+    `The app holds the full parsed rows; propose import_time with an EMPTY entries array and the app injects every row. ` +
+    `Each shift links to a staff member by name (created if new); idempotent by staff + start time. ` +
+    `Preview (first 12 of ${rows.length}):\n${head}`
+  );
+}
+
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -176,6 +291,11 @@ async function fileToAttachment(file: File): Promise<Attachment | null> {
   if (isTextLike(file)) {
     const raw = (await file.text()).slice(0, 2_000_000);
     const name = file.name || 'data.csv';
+    // Time-clock export (most specific: needs in/out or hours) → staff roster → contacts.
+    const time = parseTimeCsv(raw, name);
+    if (time && time.length) return { url: '', name, kind: 'text', text: timePreview(name, time), timeEntries: time };
+    const team = parseStaffCsv(raw, name);
+    if (team && team.length) return { url: '', name, kind: 'text', text: staffPreview(name, team), staff: team };
     const rows = parseContactsCsv(raw, name);
     if (rows && rows.length) return { url: '', name, kind: 'text', text: contactsPreview(name, rows), contacts: rows };
     return { url: '', name, kind: 'text', text: `[Attached file: ${name}]\n\n${raw.slice(0, 6000)}` };
@@ -362,6 +482,12 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
             if (a.name === 'import_contacts') {
               const parsed = imgs.flatMap((att) => att.contacts ?? []);
               if (parsed.length) inp = { ...inp, contacts: parsed };
+            } else if (a.name === 'import_staff') {
+              const parsed = imgs.flatMap((att) => att.staff ?? []);
+              if (parsed.length) inp = { ...inp, staff: parsed };
+            } else if (a.name === 'import_time') {
+              const parsed = imgs.flatMap((att) => att.timeEntries ?? []);
+              if (parsed.length) inp = { ...inp, entries: parsed };
             }
             patchLast((m) => ({ ...m, actions: [...(m.actions ?? []), { name: a.name, input: inp, status: 'pending' }] }));
           } else if (ev.t === 'error') patchLast((m) => ({ ...m, content: m.content + `\n\n[${String(ev.v)}]` }));
@@ -577,6 +703,8 @@ const ACTION_TITLES: Record<string, string> = {
   update_invoice: 'Fix invoice',
   delete_invoices: 'Delete duplicate invoices',
   import_contacts: 'Import contacts',
+  import_staff: 'Import team from Connecteam',
+  import_time: 'Import hours from Connecteam',
 };
 
 // A confirmation card for a gated write Zordon proposed. Nothing runs until the
@@ -712,6 +840,52 @@ function ActionCard({ action, onConfirm, onCancel }: { action: PendingAction; on
                   {rows.slice(0, 8).map((r, i) => (
                     <div key={i}>
                       {String(r.name ?? '—')}{r.company ? ` · ${String(r.company)}` : ''}{r.email ? ` · ${String(r.email)}` : ''}
+                    </div>
+                  ))}
+                  {rows.length > 8 ? <div>…and {rows.length - 8} more</div> : null}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+      {name === 'import_staff' && (
+        <div className="space-y-1 text-ink">
+          {(() => {
+            const rows = Array.isArray(input.staff) ? (input.staff as Record<string, unknown>[]) : [];
+            return (
+              <>
+                <div><span className="text-stone">Import:</span> {rows.length} team member{rows.length === 1 ? '' : 's'}</div>
+                <div className="mt-1 max-h-40 overflow-auto text-xs text-stone">
+                  {rows.slice(0, 8).map((r, i) => (
+                    <div key={i}>
+                      {String(r.name ?? '—')}{r.title ? ` · ${String(r.title)}` : ''}{r.email ? ` · ${String(r.email)}` : ''}
+                    </div>
+                  ))}
+                  {rows.length > 8 ? <div>…and {rows.length - 8} more</div> : null}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+      {name === 'import_time' && (
+        <div className="space-y-1 text-ink">
+          {(() => {
+            const rows = Array.isArray(input.entries) ? (input.entries as Record<string, unknown>[]) : [];
+            const people = new Set(rows.map((r) => String(r.employee ?? '').trim().toLowerCase()).filter(Boolean));
+            return (
+              <>
+                <div>
+                  <span className="text-stone">Import:</span> {rows.length} shift{rows.length === 1 ? '' : 's'}
+                  {people.size ? ` · ${people.size} ${people.size === 1 ? 'person' : 'people'}` : ''}
+                </div>
+                <div className="mt-1 max-h-40 overflow-auto text-xs text-stone">
+                  {rows.slice(0, 8).map((r, i) => (
+                    <div key={i}>
+                      {String(r.employee ?? '—')}{r.date ? ` · ${String(r.date)}` : ''}
+                      {r.clock_in ? ` · ${String(r.clock_in)}${r.clock_out ? `–${String(r.clock_out)}` : ''}` : ''}
+                      {r.hours ? ` · ${String(r.hours)}h` : ''}
                     </div>
                   ))}
                   {rows.length > 8 ? <div>…and {rows.length - 8} more</div> : null}
