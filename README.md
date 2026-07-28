@@ -32,7 +32,9 @@ Cookie-authenticated, owner/admin/member roles. Tabs:
     human clicks Confirm.
   - **QuickBooks suite** — read invoices/bills, invoice a job, create ad-hoc
     invoices and vendor bills, correct an invoice, and find/clean up duplicate
-    invoices (all gated). Needs the `QBO_*` vars + a connected QBO company.
+    invoices (all gated). Routed through the **I AM CFO** partner API to the
+    **Pride Dealer Services** books (org `pdslogix`), the same way Tulips runs —
+    no direct Intuit login. Needs the `IAMCFO_*` vars.
   - **Memory + visual reports** — remembers durable facts across sessions
     (`/crm/assistant/memory`) and composes shareable chart reports
     (`/crm/assistant/reports`).
@@ -61,8 +63,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 # server-only, never shipped to the browser:
 SUPABASE_SERVICE_ROLE_KEY=...   # optional for the web app; REQUIRED for the worker
 ANTHROPIC_API_KEY=...           # enables the Zordon assistant
-QBO_CLIENT_ID=...               # QuickBooks (optional — enables the QBO tools)
-QBO_CLIENT_SECRET=...
+IAMCFO_API_URL=...              # QuickBooks via I AM CFO (Pride Dealer Services books)
+IAMCFO_API_TOKEN=...            # the partner API shared secret
+# IAMCFO_ORG_SUBDOMAIN=pdslogix # defaults to pdslogix — the PDS Logix org
 ```
 
 The **Zordon team worker** (`worker/`) is a separate Railway service — see

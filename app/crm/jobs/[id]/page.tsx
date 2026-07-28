@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { getJob, getConditionReport } from '@/lib/crm/data';
 import { setJobStatus, deleteJob } from '@/lib/crm/actions';
 import { sendJobToQuickBooks, refreshJobFromQuickBooks } from '@/lib/crm/qbo';
-import { qboConfigured, isConnected as qboIsConnected } from '@/lib/integrations/quickbooks';
+import { iamcfoConfigured, iamcfoConnected } from '@/lib/integrations/iamcfo';
 import {
   JOB_STATUSES,
   STATUS_LABELS,
@@ -30,7 +30,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   if (!job) notFound();
   const report = await getConditionReport(id);
   const margin = job.price !== null && job.cost !== null ? job.price - job.cost : null;
-  const qboReady = qboConfigured() && (await qboIsConnected());
+  const qboReady = iamcfoConfigured() && (await iamcfoConnected());
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -103,13 +103,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
       {/* QuickBooks */}
       <h2 className="mb-3 mt-8 font-display text-xl">QuickBooks</h2>
-      {!qboConfigured() ? (
-        <Empty>QuickBooks isn’t configured yet. Add the Intuit API credentials to switch it on.</Empty>
+      {!iamcfoConfigured() ? (
+        <Empty>QuickBooks isn’t configured yet. Add the I AM CFO partner credentials to switch it on.</Empty>
       ) : !qboReady ? (
         <div className="rounded-2xl border border-line bg-white p-5 text-sm">
-          QuickBooks isn’t connected.{' '}
+          The Pride Dealer Services books (via I AM CFO) aren’t reachable.{' '}
           <Link href="/crm/settings" className="text-tulip hover:underline">
-            Connect it in Settings
+            Check Settings
           </Link>{' '}
           to send invoices.
         </div>

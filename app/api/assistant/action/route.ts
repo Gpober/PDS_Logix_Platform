@@ -3,14 +3,12 @@ import { getCurrentProfile, listClients } from '@/lib/crm/data';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { assetLabel, SERVICE_LABELS, SERVICE_TYPES, JOB_STATUSES, type ServiceType } from '@/lib/crm/types';
 import {
-  qboConfigured,
-  ensureCustomer,
-  ensureVendor,
-  createInvoice,
-  createBill,
-  updateInvoiceFields,
-  deleteInvoiceById,
-} from '@/lib/integrations/quickbooks';
+  iamcfoConfigured,
+  createInvoice as iamcfoCreateInvoice,
+  createBill as iamcfoCreateBill,
+  updateInvoice as iamcfoUpdateInvoice,
+  deleteInvoices as iamcfoDeleteInvoices,
+} from '@/lib/integrations/iamcfo';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,7 +22,10 @@ const clean = (v: unknown): string | null => {
   return s ? s : null;
 };
 const notConfigured = () =>
-  NextResponse.json({ ok: false, error: 'QuickBooks isn’t connected — connect it in Settings first.' });
+  NextResponse.json({ ok: false, error: 'QuickBooks (via I AM CFO) isn’t configured — set IAMCFO_API_URL / IAMCFO_API_TOKEN.' });
+// Turn a partner-API error (with optional name candidates) into one line.
+const writeError = (message: string, candidates?: string[]) =>
+  candidates?.length ? `${message} Did you mean: ${candidates.slice(0, 6).join(', ')}?` : message;
 
 // Resolve a client by name (fuzzy) to its row, or return null + candidates.
 async function findClient(query: string) {
@@ -175,14 +176,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, message: `Job updated (${bits.join(', ')}).` });
     }
 
-    // ---- QuickBooks writes -------------------------------------------------
+    // ---- QuickBooks writes (via I AM CFO → Pride Dealer Services books) -----
     if (kind === 'invoice_job') {
-      if (!qboConfigured()) return notConfigured();
+      if (!iamcfoConfigured()) return notConfigured();
       const id = clean(input.id);
       if (!id) return NextResponse.json({ ok: false, error: 'A job id is required.' });
       const { data, error } = await supabase
         .from('jobs')
-        .select('id, service_type, qbo_invoice_id, clients(id, name, qbo_customer_id), assets(year, make, model, vin), job_pricing(price)')
+        .select('id, service_type, qbo_invoice_id, clients(name), assets(year, make, model, vin), job_pricing(price)')
         .eq('id', id)
         .maybeSingle();
       if (error) return NextResponse.json({ ok: false, error: error.message });
@@ -190,7 +191,7 @@ export async function POST(req: Request) {
         id: string;
         service_type: ServiceType;
         qbo_invoice_id: string | null;
-        clients: { id: string; name: string; qbo_customer_id: string | null } | null;
+        clients: { name: string } | null;
         assets: { year: number | null; make: string | null; model: string | null; vin: string | null } | null;
         job_pricing: { price: number | null } | null;
       } | null;
@@ -200,50 +201,54 @@ export async function POST(req: Request) {
       const price = Number(job.job_pricing?.price ?? 0);
       if (!price) return NextResponse.json({ ok: false, error: 'Set a price on this job before invoicing it.' });
 
-      let customerId = job.clients.qbo_customer_id;
-      if (!customerId) {
-        customerId = await ensureCustomer(job.clients.name);
-        await supabase.from('clients').update({ qbo_customer_id: customerId }).eq('id', job.clients.id);
-      }
       const asset = job.assets ? assetLabel(job.assets) : null;
       const description = [SERVICE_LABELS[job.service_type], asset].filter(Boolean).join(' — ');
-      const invoice = await createInvoice(customerId, price, description);
+      const res = await iamcfoCreateInvoice({ customerName: job.clients.name, amount: price, description });
+      if (res.status === 'not_configured') return notConfigured();
+      if (res.status === 'error') return NextResponse.json({ ok: false, error: writeError(res.message, res.candidates) });
+      const inv = res.data.invoice;
+      const total = Number(inv.totalAmount ?? price);
+      const balance = Number(inv.balance ?? total);
       await supabase
         .from('jobs')
         .update({
-          qbo_invoice_id: invoice.invoiceId,
-          qbo_invoice_status: invoice.status,
-          qbo_balance: invoice.balance,
+          qbo_invoice_id: inv.docNumber || inv.id,
+          qbo_invoice_status: balance <= 0 ? 'paid' : balance < total ? 'partial' : 'unpaid',
+          qbo_balance: balance,
           qbo_synced_at: new Date().toISOString(),
         })
         .eq('id', id);
-      return NextResponse.json({ ok: true, message: `Invoiced ${job.clients.name} — ${usd(price)} in QuickBooks (saved, not emailed).` });
+      const num = inv.docNumber ? ` #${inv.docNumber}` : '';
+      return NextResponse.json({ ok: true, message: `Invoiced ${job.clients.name}${num} — ${usd(price)} in QuickBooks (saved, not emailed).` });
     }
 
     if (kind === 'create_invoice') {
-      if (!qboConfigured()) return notConfigured();
+      if (!iamcfoConfigured()) return notConfigured();
       const customer = clean(input.customer);
       const amount = Number(input.amount);
       if (!customer) return NextResponse.json({ ok: false, error: 'A customer name is required.' });
       if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ ok: false, error: 'A positive amount is required.' });
-      const customerId = await ensureCustomer(customer);
-      const invoice = await createInvoice(customerId, amount, clean(input.description) ?? 'Services');
-      return NextResponse.json({
-        ok: true,
-        message: `Invoice created in QuickBooks — ${usd(amount)} to ${customer}. Saved in QBO, not emailed.`,
-        id: invoice.invoiceId,
+      const res = await iamcfoCreateInvoice({
+        customerName: customer,
+        amount,
+        description: clean(input.description) ?? undefined,
+        dueDate: isDay(input.due_date) ? input.due_date : undefined,
       });
+      if (res.status === 'not_configured') return notConfigured();
+      if (res.status === 'error') return NextResponse.json({ ok: false, error: writeError(res.message, res.candidates) });
+      const inv = res.data.invoice;
+      const num = inv.docNumber ? ` #${inv.docNumber}` : '';
+      return NextResponse.json({ ok: true, message: `Invoice${num} created in QuickBooks — ${usd(inv.totalAmount)} to ${inv.customer}. Saved in QBO, not emailed.` });
     }
 
     if (kind === 'create_bill') {
-      if (!qboConfigured()) return notConfigured();
+      if (!iamcfoConfigured()) return notConfigured();
       const vendor = clean(input.vendor);
       const amount = Number(input.amount);
       if (!vendor) return NextResponse.json({ ok: false, error: 'A vendor name is required.' });
       if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ ok: false, error: 'A positive amount is required.' });
-      const vendorId = await ensureVendor(vendor);
-      const bill = await createBill({
-        vendorId,
+      const res = await iamcfoCreateBill({
+        vendorName: vendor,
         amount,
         description: clean(input.description) ?? undefined,
         accountName: clean(input.account) ?? undefined,
@@ -251,12 +256,15 @@ export async function POST(req: Request) {
         txnDate: isDay(input.bill_date) ? input.bill_date : undefined,
         dueDate: isDay(input.due_date) ? input.due_date : undefined,
       });
-      const num = bill.number ? ` #${bill.number}` : '';
-      return NextResponse.json({ ok: true, message: `Bill${num} created in QuickBooks — ${usd(amount)} to ${vendor}.` });
+      if (res.status === 'not_configured') return notConfigured();
+      if (res.status === 'error') return NextResponse.json({ ok: false, error: writeError(res.message, res.candidates) });
+      const bill = res.data.bill;
+      const num = bill.docNumber ? ` #${bill.docNumber}` : '';
+      return NextResponse.json({ ok: true, message: `Bill${num} created in QuickBooks — ${usd(bill.totalAmount)} to ${bill.vendor}.` });
     }
 
     if (kind === 'update_invoice') {
-      if (!qboConfigured()) return notConfigured();
+      if (!iamcfoConfigured()) return notConfigured();
       const invoiceNumber = clean(input.invoice_number);
       if (!invoiceNumber) return NextResponse.json({ ok: false, error: 'An invoice number is required.' });
       const txnDate = isDay(input.date) ? input.date : undefined;
@@ -265,38 +273,31 @@ export async function POST(req: Request) {
       if (!txnDate && !dueDate && !customerName) {
         return NextResponse.json({ ok: false, error: 'Nothing to change — give a new date and/or customer.' });
       }
-      const res = await updateInvoiceFields(invoiceNumber, { txnDate, dueDate, customerName });
-      if (!res.ok) return NextResponse.json({ ok: false, error: res.reason });
+      const res = await iamcfoUpdateInvoice({ invoiceNumber, txnDate, dueDate, customerName });
+      if (res.status === 'not_configured') return notConfigured();
+      if (res.status === 'error') return NextResponse.json({ ok: false, error: writeError(res.message, res.candidates) });
+      if (!res.data.ok) return NextResponse.json({ ok: false, error: res.data.message ?? `Invoice #${invoiceNumber} wasn’t changed.` });
+      const inv = res.data.invoice;
       const bits = [
-        txnDate ? `date → ${res.invoice.txnDate ?? txnDate}` : null,
-        customerName ? `customer → ${res.invoice.customer ?? customerName}` : null,
+        txnDate ? `date → ${inv?.txnDate ?? txnDate}` : null,
+        customerName ? `customer → ${inv?.customer ?? customerName}` : null,
       ].filter(Boolean);
-      return NextResponse.json({ ok: true, message: `Invoice #${res.invoice.number ?? invoiceNumber} updated (${bits.join(', ')}).` });
+      return NextResponse.json({ ok: true, message: `Invoice #${inv?.docNumber ?? invoiceNumber} updated (${bits.join(', ')}).` });
     }
 
     if (kind === 'delete_invoices') {
-      if (!qboConfigured()) return notConfigured();
+      if (!iamcfoConfigured()) return notConfigured();
       const list = Array.isArray(input.invoices) ? (input.invoices as Record<string, unknown>[]) : [];
       const ids = Array.from(new Set(list.map((i) => String(i.id ?? '').trim()).filter(Boolean)));
       if (!ids.length) return NextResponse.json({ ok: false, error: 'No invoices to delete.' });
-      let deleted = 0;
-      let skippedPaid = 0;
-      let notFound = 0;
-      const errors: string[] = [];
-      for (const id of ids) {
-        try {
-          const r = await deleteInvoiceById(id);
-          if (r === 'deleted') deleted += 1;
-          else if (r === 'skipped_paid') skippedPaid += 1;
-          else notFound += 1;
-        } catch (e) {
-          errors.push(e instanceof Error ? e.message : 'delete failed');
-        }
-      }
-      const parts = [`Deleted ${deleted} duplicate invoice${deleted === 1 ? '' : 's'} in QuickBooks`];
-      if (skippedPaid) parts.push(`${skippedPaid} skipped (paid — left alone)`);
-      if (notFound) parts.push(`${notFound} not found`);
-      if (errors.length) parts.push(`${errors.length} error${errors.length === 1 ? '' : 's'} — ${errors.slice(0, 3).join('; ')}`);
+      const res = await iamcfoDeleteInvoices(ids);
+      if (res.status === 'not_configured') return notConfigured();
+      if (res.status === 'error') return NextResponse.json({ ok: false, error: writeError(res.message, res.candidates) });
+      const d = res.data;
+      const parts = [`Deleted ${d.deleted_count} duplicate invoice${d.deleted_count === 1 ? '' : 's'} in QuickBooks`];
+      if (d.skipped_paid.length) parts.push(`${d.skipped_paid.length} skipped (paid — left alone)`);
+      if (d.not_found.length) parts.push(`${d.not_found.length} not found`);
+      if (d.errors.length) parts.push(`${d.errors.length} error${d.errors.length === 1 ? '' : 's'} — ${d.errors.slice(0, 3).join('; ')}`);
       return NextResponse.json({ ok: true, message: parts.join(' · ') + '.' });
     }
 

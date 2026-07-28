@@ -29,12 +29,7 @@ import {
   type MemoryCategory,
   type ServiceType,
 } from '@/lib/crm/types';
-import {
-  findDuplicateInvoices,
-  listBills,
-  listInvoices,
-  qboConfigured,
-} from '@/lib/integrations/quickbooks';
+import { getBills, getDuplicateInvoices, getInvoices } from '@/lib/integrations/iamcfo';
 import { runSpecialist, SPECIALIST_KEYS } from './specialists';
 import { BUILD_REPORT_INPUT_SCHEMA, normalizeReportInput } from './reportBlocks';
 
@@ -90,20 +85,13 @@ const clamp = (n: unknown, def: number, max: number) => {
   return Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), max) : def;
 };
 
-// A friendly wrapper for QBO reads: report "not configured" instead of throwing
-// a raw connection error into the model's lap.
-async function qbo<T>(fn: () => Promise<T>): Promise<T | { configured: false; message: string }> {
-  if (!qboConfigured()) {
-    return { configured: false, message: 'QuickBooks isn’t configured — set QBO_CLIENT_ID / QBO_CLIENT_SECRET and connect it in Settings.' };
-  }
-  try {
-    return await fn();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'QuickBooks request failed.';
-    if (/not connected/i.test(msg)) return { configured: false, message: 'QuickBooks isn’t connected yet — connect it in Settings.' };
-    throw e;
-  }
-}
+// PDS's QuickBooks lives in I AM CFO (org "PDS Logix" / Pride Dealer Services).
+// This maps a partner-API Result into the {configured:false} | {error} | data
+// shape the model reads.
+const NOT_CONFIGURED = {
+  configured: false,
+  message: 'QuickBooks (via I AM CFO) isn’t configured — set IAMCFO_API_URL / IAMCFO_API_TOKEN.',
+};
 
 // ---- tool schemas -----------------------------------------------------------
 
@@ -592,36 +580,43 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'job_analytics':
       return jobAnalytics();
 
-    case 'get_invoices':
-      return qbo(async () => {
-        const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
-        const rows = await listInvoices({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
-        return number ? { found: rows.length > 0, invoice: rows[0] ?? null } : { count: rows.length, invoices: rows };
-      });
+    case 'get_invoices': {
+      const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
+      const res = await getInvoices({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      return number
+        ? { found: d.found ?? false, invoice: d.invoice ?? null }
+        : { count: d.count ?? 0, invoices: d.invoices ?? [] };
+    }
 
-    case 'get_bills':
-      return qbo(async () => {
-        const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
-        const rows = await listBills({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
-        return number ? { found: rows.length > 0, bill: rows[0] ?? null } : { count: rows.length, bills: rows };
-      });
+    case 'get_bills': {
+      const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
+      const res = await getBills({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      return number ? { found: d.found ?? false, bill: d.bill ?? null } : { count: d.count ?? 0, bills: d.bills ?? [] };
+    }
 
-    case 'find_duplicate_invoices':
-      return qbo(async () => {
-        const groups = await findDuplicateInvoices();
-        const shaped = groups.map((g) => {
-          const sorted = [...g.invoices].sort((a, b) => (a.txnDate ?? '') < (b.txnDate ?? '') ? -1 : 1);
-          const keep = sorted.find((i) => i.paid) ?? sorted[0];
-          const deletable = sorted.filter((i) => i.id !== keep.id && !i.paid);
-          return { number: g.number, count: g.count, keep, delete_candidates: deletable };
-        });
-        return {
-          duplicate_numbers: shaped.length,
-          deletable_extras: shaped.reduce((s, g) => s + g.delete_candidates.length, 0),
-          note: 'To remove them, propose delete_invoices with the delete_candidates (their ids). One invoice per number is kept; paid copies are never deleted.',
-          groups: shaped,
-        };
+    case 'find_duplicate_invoices': {
+      const res = await getDuplicateInvoices();
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const shaped = res.data.groups.map((g) => {
+        const sorted = [...g.invoices].sort((a, b) => ((a.txnDate ?? '') < (b.txnDate ?? '') ? -1 : 1));
+        const keep = sorted.find((i) => i.paid) ?? sorted[0];
+        const deletable = sorted.filter((i) => i.id !== keep.id && !i.paid);
+        return { number: g.docNumber, count: g.count, keep, delete_candidates: deletable };
       });
+      return {
+        duplicate_numbers: shaped.length,
+        deletable_extras: shaped.reduce((s, g) => s + g.delete_candidates.length, 0),
+        note: 'To remove them, propose delete_invoices with the delete_candidates (their ids). One invoice per number is kept; paid copies are never deleted.',
+        groups: shaped,
+      };
+    }
 
     case 'save_draft': {
       const subject = typeof input.subject === 'string' ? input.subject.trim() : '';
