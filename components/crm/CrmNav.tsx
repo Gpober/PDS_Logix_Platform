@@ -12,6 +12,7 @@ const tabs = [
   { href: '/crm/time', label: 'Time Clock' },
   { href: '/crm/assets', label: 'Assets' },
   { href: '/crm/jobs', label: 'Jobs' },
+  { href: '/crm/production', label: 'Production' },
   { href: '/crm/leads', label: 'Leads' },
   { href: '/crm/settings', label: 'Settings' },
 ];

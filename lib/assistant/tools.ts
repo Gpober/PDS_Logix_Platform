@@ -17,6 +17,7 @@ import {
   listJobs,
   listLeads,
   listStaff,
+  productionSummary,
 } from '@/lib/crm/data';
 import {
   assetLabel,
@@ -196,6 +197,19 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
     description:
       'Per-client ranking: job count, completed count, pipeline vs invoiced dollars, and total value — biggest book of business first. Use for "who are our biggest clients" or account reviews.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'production',
+    description:
+      "PRODUCTION VOLUME — the count of units serviced (condition reports and photo sets) logged at auction/dealer locations, broken down by location, service type, person, month, and day. Use for 'how many units did we do', 'production at Manheim Dallas', 'who's our most productive tech', 'volume by service type', or a productivity report. This is OPERATIONAL VOLUME (units), distinct from the books (dollars) and from CRM jobs — pair it with client_financials to get revenue-per-unit. Scope with location (e.g. 'Manheim Dallas') and/or from/to (YYYY-MM-DD); omit for everything on record.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        location: { type: 'string', description: "Location name, e.g. 'Manheim Dallas' (optional; omit for all)." },
+        from: { type: 'string', description: 'Start date YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'End date YYYY-MM-DD (optional).' },
+      },
+    },
   },
   {
     name: 'job_analytics',
@@ -641,6 +655,7 @@ export const TOOL_LABELS: Record<string, string> = {
   list_leads: 'Reading the lead pipeline',
   get_lead: 'Reading the lead',
   client_performance: 'Ranking client performance',
+  production: 'Counting production volume',
   job_analytics: 'Analyzing the operation',
   get_invoices: 'Reading invoices',
   get_bills: 'Reading bills',
@@ -754,6 +769,23 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
 
     case 'job_analytics':
       return jobAnalytics();
+
+    case 'production': {
+      const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const location = typeof input.location === 'string' && input.location.trim() ? input.location.trim() : undefined;
+      const s = await productionSummary({ location, from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
+      return {
+        total_units: s.total_units,
+        date_from: s.date_from,
+        date_to: s.date_to,
+        by_location: s.locations,
+        by_service_type: s.by_service,
+        by_person: s.by_staff.slice(0, 40),
+        by_month: s.by_month,
+        note: 'Units serviced (condition reports & photo sets). Operational volume, not dollars — pair with client_financials for revenue per unit.',
+        source: 'Production log (Connecteam entries)',
+      };
+    }
 
     case 'get_invoices': {
       const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;

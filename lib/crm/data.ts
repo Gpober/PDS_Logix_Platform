@@ -576,3 +576,38 @@ export async function enqueueTeamRun(scope: string): Promise<{ id: string } | { 
   if (error) return { error: error.message };
   return { id: (data as { id: string }).id };
 }
+
+// ---- Production (Connecteam unit log) --------------------------------------
+// Aggregates production_entries via the get_production_summary RPC: total units,
+// and breakdowns by location, service type, person, month, and day. Optional
+// location / date scope.
+export interface ProductionSummary {
+  total_units: number;
+  date_from: string | null;
+  date_to: string | null;
+  locations: { location: string; units: number }[];
+  by_service: { service_type: string; units: number }[];
+  by_staff: { staff: string; units: number }[];
+  by_month: { month: string; units: number }[];
+  by_day: { day: string; units: number }[];
+}
+
+export async function productionSummary(opts?: { location?: string; from?: string; to?: string }): Promise<ProductionSummary> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.rpc('get_production_summary', {
+    p_location: opts?.location ?? null,
+    p_from: opts?.from ?? null,
+    p_to: opts?.to ?? null,
+  });
+  const d = (data ?? {}) as Partial<ProductionSummary>;
+  return {
+    total_units: d.total_units ?? 0,
+    date_from: d.date_from ?? null,
+    date_to: d.date_to ?? null,
+    locations: d.locations ?? [],
+    by_service: d.by_service ?? [],
+    by_staff: d.by_staff ?? [],
+    by_month: d.by_month ?? [],
+    by_day: d.by_day ?? [],
+  };
+}
