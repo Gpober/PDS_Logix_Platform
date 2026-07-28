@@ -83,9 +83,17 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Never let a Supabase hiccup (network blip, malformed env override, expired
+  // token refresh) throw out of middleware — that surfaces as a site-wide
+  // MIDDLEWARE_INVOCATION_FAILED 500. On any error, treat the caller as signed
+  // out: the /crm + /portal guards below still apply, so we fail safe, not open.
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch {
+    user = null;
+  }
 
   const { pathname } = request.nextUrl;
 
