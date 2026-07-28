@@ -47,6 +47,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_leads: 'Reading the lead pipeline',
   get_lead: 'Reading the lead',
   client_performance: 'Ranking client performance',
+  production: 'Counting production volume',
   job_analytics: 'Analyzing the operation',
   get_invoices: 'Reading invoices',
   get_bills: 'Reading bills',
