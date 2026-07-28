@@ -35,6 +35,7 @@ import {
   getInvoices,
 } from '@/lib/integrations/iamcfo';
 import {
+  getAccountBreakdown,
   getArAging,
   getBooksFreshness,
   getCashFlow,
@@ -253,6 +254,19 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
       properties: {
         from: { type: 'string', description: 'Period start YYYY-MM-DD (optional).' },
         to: { type: 'string', description: 'Period end YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'pnl_by_account',
+    description:
+      "The ITEMIZED profit & loss — every income and expense ACCOUNT with its amount for the period, grouped Income / Cost of Goods Sold / Expense / Other, with subtotals (revenue, gross profit, operating expenses, net income). This is the line-item P&L detail (e.g. Condition Reports, Detail Services, Photography, Contractors & Payroll, Travel:Hotel), matching QuickBooks' P&L to the penny; sub-accounts read as 'Parent:Sub'. Use for 'itemized P&L', 'break the P&L down by account', 'what are we spending on', 'biggest expenses', or a detailed income-statement report. Optionally scope to ONE client with `customer` (the QuickBooks customer name, e.g. from client_financials) for that client's itemized P&L. Scope the period with from/to (YYYY-MM-DD); omit for the current month.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Period start YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'Period end YYYY-MM-DD (optional).' },
+        customer: { type: 'string', description: 'Optional: itemize just this client (QuickBooks customer name; matches sub-customers too).' },
       },
     },
   },
@@ -563,6 +577,7 @@ export const TOOL_LABELS: Record<string, string> = {
   find_duplicate_invoices: 'Finding duplicate invoices',
   financials: 'Reading the books',
   client_financials: 'Reading client profitability',
+  pnl_by_account: 'Itemizing the P&L by account',
   ar_aging: 'Aging receivables',
   cash_flow: 'Building the cash-flow statement',
   cash_calendar: 'Reading the cash calendar',
@@ -737,6 +752,37 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
       };
     }
 
+    case 'pnl_by_account': {
+      const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const customer = typeof input.customer === 'string' && input.customer.trim() ? input.customer.trim() : undefined;
+      const res = await getAccountBreakdown({ from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined }, customer);
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      const s = d.subtotals;
+      return {
+        period: d.period,
+        currency: 'USD',
+        ...(d.customer ? { customer: d.customer } : {}),
+        income: d.income,
+        cost_of_goods_sold: d.costOfGoodsSold,
+        expenses: d.expenses,
+        ...(d.otherIncome.length ? { other_income: d.otherIncome } : {}),
+        ...(d.otherExpense.length ? { other_expense: d.otherExpense } : {}),
+        subtotals: {
+          revenue: s.revenue,
+          cogs: s.cogs,
+          gross_profit: s.grossProfit,
+          gross_margin_pct: s.grossMargin,
+          operating_expenses: s.operatingExpenses,
+          net_income: s.netIncome,
+          net_margin_pct: s.netMargin,
+        },
+        note: "Itemized P&L; every account nets to the subtotals. Amounts are period totals per account (sub-accounts as 'Parent:Sub'). Matches QuickBooks' P&L detail.",
+        source: 'QuickBooks (PDS Logix books of record)',
+      };
+    }
+
     case 'ar_aging': {
       const res = await getArAging();
       if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
@@ -760,7 +806,7 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
       if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
-      const top = (lines: { account: string; amount: number }[]) => lines.slice(0, 12).map((l) => ({ account: l.account, amount: l.amount }));
+      const top = (lines: { account: string; amount: number }[]) => lines.slice(0, 100).map((l) => ({ account: l.account, amount: l.amount }));
       return {
         period: d.period,
         currency: 'USD',
