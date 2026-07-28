@@ -29,7 +29,18 @@ import {
   type MemoryCategory,
   type ServiceType,
 } from '@/lib/crm/types';
-import { getBills, getDuplicateInvoices, getInvoices } from '@/lib/integrations/iamcfo';
+import {
+  getBills,
+  getDuplicateInvoices,
+  getInvoices,
+} from '@/lib/integrations/iamcfo';
+import {
+  getArAging,
+  getBooksFreshness,
+  getCashFlow,
+  getCompanyFinancials,
+  getCustomerFinancials,
+} from '@/lib/integrations/pdsbooks';
 import { runSpecialist, SPECIALIST_KEYS } from './specialists';
 import { BUILD_REPORT_INPUT_SCHEMA, normalizeReportInput } from './reportBlocks';
 
@@ -91,6 +102,13 @@ const clamp = (n: unknown, def: number, max: number) => {
 const NOT_CONFIGURED = {
   configured: false,
   message: 'QuickBooks (via I AM CFO) isn’t configured — set IAMCFO_API_URL / IAMCFO_API_TOKEN.',
+};
+
+// The books reads (financials, client_financials, ar_aging, cash_calendar,
+// refresh_books) come from the PDS Logix data warehouse, not the partner API.
+const BOOKS_NOT_CONFIGURED = {
+  configured: false,
+  message: 'The books aren’t connected — set PDS_BOOKS_SUPABASE_URL / PDS_BOOKS_SUPABASE_KEY.',
 };
 
 // ---- tool schemas -----------------------------------------------------------
@@ -211,6 +229,54 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
     name: 'find_duplicate_invoices',
     description:
       'READ-ONLY: find invoice numbers that appear more than once in QuickBooks (accidental duplicates). Returns each duplicated number with its invoices (id, customer, amount, date, paid). To remove them, propose delete_invoices with the EXTRA copies — a paid invoice is never deleted.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'financials',
+    description:
+      "The company's real books from QuickBooks — the SAME ledger the pdslogix.net dashboards read (the accounting source of truth). Returns a QBO-accurate P&L (revenue, COGS, gross profit + gross margin, operating expenses, other income/expense, net income + net margin), cash on hand, receivables (total + past due), and payables. Use for 'what's our P&L', 'how's our margin', 'how much cash', 'how are the books', or to lead a financial report. Scope to a period with from/to (YYYY-MM-DD); omit for the current month (falls back to the most recent month with activity so you never report a false $0). For a per-client breakdown use client_financials; for receivables aging use ar_aging. You read and explain the books here — you can post invoices/bills (gated) but not journal entries.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Period start YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'Period end YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'client_financials',
+    description:
+      "Per-CUSTOMER P&L from the books, ranked by revenue — the client-profitability breakdown the dashboards show. Each customer gets revenue, COGS, gross profit, operating expenses, net income, and margins, computed exactly like QuickBooks' P&L-by-Customer. Use for 'which clients make us the most', 'profitability by client', 'how's Manheim Dallas doing', or client-profitability reports. Customer names are the QuickBooks names (sub-customers appear as 'Parent:Sub', e.g. 'Cox Automotive Corporate Services, LLC:Manheim Dallas'); 'Not specified' (QuickBooks' own label) is overhead not tagged to a customer. Scope with from/to (YYYY-MM-DD); omit for the current month (falls back to the latest month with activity).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Period start YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'Period end YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'ar_aging',
+    description:
+      "Accounts-receivable aging by client — who owes us and how overdue. Each client's open balance is bucketed Current (≤30 days past due), 31–60, 61–90, and 90+, with totals; sub-customers roll up to the parent client. Point-in-time (today). Use for 'who owes us', 'A/R aging', 'past-due receivables', or collections reports. Past-due figures also appear as a total in financials; this breaks them out by client and age.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'cash_calendar',
+    description:
+      "Forward cash view from the books: money DUE IN (open receivables with real due dates, by client) and money OWED OUT (open payables, by vendor), plus the net expected. Use for cash-flow questions — what's coming in, who owes us and when, what we owe out. Optionally scope by due date with from/to (YYYY-MM-DD); omit to see all open items. For overdue-by-age use ar_aging.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Only items due on/after this date YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'Only items due on/before this date YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'refresh_books',
+    description:
+      "Check how current the books are — returns the latest ledger date (as-of) and the total line count. The books are synced from QuickBooks automatically on the I AM CFO side; this reports freshness rather than triggering a sync. Use when someone asks 'how current are the books', 'when were these last updated', or before a report if they wonder whether the numbers are stale.",
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -482,6 +548,11 @@ export const TOOL_LABELS: Record<string, string> = {
   get_invoices: 'Reading invoices',
   get_bills: 'Reading bills',
   find_duplicate_invoices: 'Finding duplicate invoices',
+  financials: 'Reading the books',
+  client_financials: 'Reading client profitability',
+  ar_aging: 'Aging receivables',
+  cash_calendar: 'Reading the cash calendar',
+  refresh_books: 'Checking book freshness',
   save_draft: 'Saving a draft',
   remember: 'Saving to memory',
   build_report: 'Building a report',
@@ -583,7 +654,7 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'get_invoices': {
       const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
       const res = await getInvoices({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
-      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
       return number
@@ -594,10 +665,108 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'get_bills': {
       const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
       const res = await getBills({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
-      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
       return number ? { found: d.found ?? false, bill: d.bill ?? null } : { count: d.count ?? 0, bills: d.bills ?? [] };
+    }
+
+    case 'financials': {
+      const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const res = await getCompanyFinancials({ from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      return {
+        period: d.period,
+        currency: 'USD',
+        profit_and_loss: {
+          revenue: d.revenue,
+          cogs: d.cogs,
+          gross_profit: d.grossProfit,
+          gross_margin_pct: d.grossMargin,
+          operating_expenses: d.operatingExpenses,
+          other_income: d.otherIncome,
+          other_expense: d.otherExpense,
+          net_income: d.netIncome,
+          net_margin_pct: d.netMargin,
+        },
+        cash: { balance: d.cashBalance },
+        receivables: { total: d.receivables.total, past_due: d.receivables.pastDue },
+        payables: { total: d.payables.total },
+        books_as_of: d.asOf,
+        source: 'QuickBooks (PDS Logix books of record) — same ledger as the pdslogix.net dashboards',
+      };
+    }
+
+    case 'client_financials': {
+      const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const res = await getCustomerFinancials({ from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
+      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      return {
+        period: d.period,
+        currency: 'USD',
+        client_count: d.customers.length,
+        clients: d.customers.map((c) => ({
+          customer: c.customer,
+          revenue: c.revenue,
+          cogs: c.cogs,
+          gross_profit: c.grossProfit,
+          operating_expenses: c.operatingExpenses,
+          net_income: c.netIncome,
+          net_margin_pct: c.netMargin,
+        })),
+        note: "Per-customer P&L, ranked by revenue. 'Not specified' is overhead not tagged to a client. Names are QuickBooks names ('Parent:Sub' for sub-customers).",
+        source: 'QuickBooks (PDS Logix books of record)',
+      };
+    }
+
+    case 'ar_aging': {
+      const res = await getArAging();
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      return {
+        as_of: d.asOf || 'today',
+        buckets: 'current (≤30d past due), 31-60, 61-90, 90+ days',
+        totals: { current: d.totals.current, d31_60: d.totals.d31_60, d61_90: d.totals.d61_90, d90_plus: d.totals.d90_plus, total: d.totals.total },
+        clients: d.rows.map((r) => ({
+          customer: r.customer,
+          current: r.current, d31_60: r.d31_60, d61_90: r.d61_90, d90_plus: r.d90_plus, total: r.total,
+        })),
+        source: 'QuickBooks A/R aging (PDS Logix books of record)',
+      };
+    }
+
+    case 'cash_calendar': {
+      const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const res = await getCashFlow({ from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      const cap = 30;
+      return {
+        window: d.from || d.to ? { from: d.from || null, to: d.to || null } : 'all open items',
+        summary: { due_in: d.summary.dueIn, owed_out: d.summary.owedOut, net_expected: d.summary.net },
+        due_receivables: d.dueReceivables.slice(0, cap),
+        payables_out: d.payables.slice(0, cap),
+        counts: { receivables: d.dueReceivables.length, payables: d.payables.length },
+        note: 'Forward view of open A/R (money due in) and A/P (money owed out) by due date. For overdue-by-age use ar_aging.',
+        source: 'QuickBooks (PDS Logix books of record)',
+      };
+    }
+
+    case 'refresh_books': {
+      const res = await getBooksFreshness();
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      return {
+        books_as_of: res.data.asOf,
+        ledger_lines: res.data.lineCount,
+        message: 'The books are synced from QuickBooks automatically on the I AM CFO side. This is the latest data available now.',
+      };
     }
 
     case 'find_duplicate_invoices': {
