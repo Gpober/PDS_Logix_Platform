@@ -246,7 +246,7 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'client_financials',
     description:
-      "Per-CUSTOMER P&L from the books, ranked by revenue — the client-profitability breakdown the dashboards show. Each customer gets revenue, COGS, gross profit, operating expenses, net income, and margins, computed exactly like QuickBooks' P&L-by-Customer. Use for 'which clients make us the most', 'profitability by client', 'how's Manheim Dallas doing', or client-profitability reports. Customer names are the QuickBooks names (sub-customers appear as 'Parent:Sub', e.g. 'Cox Automotive Corporate Services, LLC:Manheim Dallas'); 'Unassigned' is overhead not tagged to a customer. Scope with from/to (YYYY-MM-DD); omit for the current month (falls back to the latest month with activity).",
+      "Per-CUSTOMER P&L from the books, ranked by revenue — the client-profitability breakdown the dashboards show. Each customer gets revenue, COGS, gross profit, operating expenses, net income, and margins, computed exactly like QuickBooks' P&L-by-Customer. Use for 'which clients make us the most', 'profitability by client', 'how's Manheim Dallas doing', or client-profitability reports. Customer names are the QuickBooks names (sub-customers appear as 'Parent:Sub', e.g. 'Cox Automotive Corporate Services, LLC:Manheim Dallas'); 'Not specified' (QuickBooks' own label) is overhead not tagged to a customer. Scope with from/to (YYYY-MM-DD); omit for the current month (falls back to the latest month with activity).",
     input_schema: {
       type: 'object',
       properties: {
@@ -718,7 +718,7 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
           net_income: c.netIncome,
           net_margin_pct: c.netMargin,
         })),
-        note: "Per-customer P&L, ranked by revenue. 'Unassigned' is overhead not tagged to a client. Names are QuickBooks names ('Parent:Sub' for sub-customers).",
+        note: "Per-customer P&L, ranked by revenue. 'Not specified' is overhead not tagged to a client. Names are QuickBooks names ('Parent:Sub' for sub-customers).",
         source: 'QuickBooks (PDS Logix books of record)',
       };
     }

@@ -106,10 +106,20 @@ function monthRange(d: Date): { from: string; to: string } {
 function periodLabel(from: string, to: string): string {
   const s = new Date(`${from}T00:00:00Z`);
   const e = new Date(`${to}T00:00:00Z`);
-  const fmt = (x: Date) => x.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  // A single calendar month reads as "July 2026"; anything else as a range.
-  if (s.getUTCFullYear() === e.getUTCFullYear() && s.getUTCMonth() === e.getUTCMonth()) return fmt(s);
-  return `${fmt(s)} – ${fmt(e)}`;
+  const monthYear = (x: Date) => x.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const fullDate = (x: Date) => x.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  const sameMonth = s.getUTCFullYear() === e.getUTCFullYear() && s.getUTCMonth() === e.getUTCMonth();
+  const lastOfMonth = new Date(Date.UTC(e.getUTCFullYear(), e.getUTCMonth() + 1, 0)).getUTCDate();
+  const isFullMonth = sameMonth && s.getUTCDate() === 1 && e.getUTCDate() === lastOfMonth;
+  // A full calendar month reads as "July 2026"; a partial month or any other
+  // span reads as exact dates ("Jul 1–28, 2026", "Jan 1, 2026 – Jun 30, 2026")
+  // so a period is never mistaken for one the owner ran in QuickBooks.
+  if (isFullMonth) return monthYear(s);
+  if (sameMonth) {
+    const mo = s.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+    return `${mo} ${s.getUTCDate()}–${e.getUTCDate()}, ${e.getUTCFullYear()}`;
+  }
+  return `${fullDate(s)} – ${fullDate(e)}`;
 }
 
 // Page through a filtered select (Supabase caps a response at 1000 rows).
@@ -266,8 +276,8 @@ export async function getCompanyFinancials(range?: { from?: string; to?: string 
 }
 
 // Per-customer P&L for a period — the breakdown the dashboards show, ranked by
-// revenue. Zero-activity customers are dropped. "Unassigned" collects lines with
-// no customer (overhead/company-wide).
+// revenue. Zero-activity customers are dropped. "Not specified" collects lines
+// with no customer (overhead/company-wide) — the same label QuickBooks uses.
 export async function getCustomerFinancials(range?: { from?: string; to?: string }): Promise<
   BooksResult<{ period: string; from: string; to: string; customers: CustomerPnL[] }>
 > {
@@ -287,7 +297,7 @@ export async function getCustomerFinancials(range?: { from?: string; to?: string
 
     const byCustomer = new Map<string, RawLine[]>();
     for (const l of lines) {
-      const key = l.customer && l.customer.trim() ? l.customer.trim() : 'Unassigned';
+      const key = l.customer && l.customer.trim() ? l.customer.trim() : 'Not specified';
       const arr = byCustomer.get(key) ?? [];
       arr.push(l);
       byCustomer.set(key, arr);
@@ -351,7 +361,7 @@ export async function getArAging(): Promise<BooksResult<{ rows: AgingRow[]; tota
     const now = Date.now();
     const map = new Map<string, AgingRow>();
     for (const r of data) {
-      const parent = (r.customer ?? 'Unassigned').split(':')[0].trim() || 'Unassigned';
+      const parent = (r.customer ?? 'Not specified').split(':')[0].trim() || 'Not specified';
       const row = map.get(parent) ?? { customer: parent, current: 0, d31_60: 0, d61_90: 0, d90_plus: 0, total: 0 };
       const bal = num(r.open_balance);
       const days = r.due_date ? Math.floor((now - new Date(r.due_date).getTime()) / 86_400_000) : 0;
@@ -412,7 +422,7 @@ export async function getCashFlow(range?: { from?: string; to?: string }): Promi
 
     const dueReceivables = ((ar ?? []) as { customer: string | null; due_date: string | null; open_balance: number; number: string | null }[])
       .filter((r) => inWindow(r.due_date))
-      .map((r) => ({ customer: r.customer ?? 'Unassigned', amount: round2(num(r.open_balance)), dueDate: r.due_date, number: r.number ?? null }))
+      .map((r) => ({ customer: r.customer ?? 'Not specified', amount: round2(num(r.open_balance)), dueDate: r.due_date, number: r.number ?? null }))
       .sort((a, b) => b.amount - a.amount);
     const payables = ((ap ?? []) as { vendor: string | null; due_date: string | null; open_balance: number; number: string | null }[])
       .filter((r) => inWindow(r.due_date))
