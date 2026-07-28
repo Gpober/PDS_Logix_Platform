@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from 'next';
-import { Fraunces, Inter } from 'next/font/google';
+import { Archivo, Inter } from 'next/font/google';
 import './globals.css';
 
-const display = Fraunces({
+const display = Archivo({
   subsets: ['latin'],
   variable: '--font-display',
   display: 'swap',
-  axes: ['opsz'],
+  weight: ['600', '700', '800'],
 });
 
 const sans = Inter({

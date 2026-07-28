@@ -12,6 +12,14 @@
   ::selection {
     @apply bg-tulip text-ivory;
   }
+  /* PDS headings are a heavy, slightly-tight grotesque. Default the display
+     family to bold + tight tracking so headings read like the brand without
+     touching every heading's classes (an explicit font-weight utility still
+     wins where one is set). */
+  .font-display {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
 }
 
 @layer components {

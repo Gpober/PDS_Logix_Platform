@@ -1,15 +1,15 @@
 import type { ReportBlock, ReportTone } from '@/lib/crm/types';
 
 const TONE_HEX: Record<ReportTone, string> = {
-  ink: '#1A1816',
-  positive: '#5B8C5A',
-  negative: '#BE9197',
-  warning: '#B8874A',
-  info: '#4A7C8C',
+  ink: '#F2F5F8',
+  positive: '#4ADE80',
+  negative: '#F87171',
+  warning: '#FBBF24',
+  info: '#16B4E8',
 };
 
-const BAR = '#9E6F76';
-const LINE = '#4A7C8C';
+const BAR = '#16B4E8';
+const LINE = '#5AB6D8';
 
 const nf = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
@@ -17,7 +17,7 @@ function Kpis({ items }: { items: Extract<ReportBlock, { type: 'kpis' }>['items'
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
       {items.map((k, i) => (
-        <div key={i} className="rounded-2xl border border-line bg-gradient-to-b from-white to-[#FBF5EC] p-5 text-center">
+        <div key={i} className="rounded-2xl border border-line bg-white p-5 text-center">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone">{k.label}</div>
           <div className="mt-2 font-display text-2xl" style={{ color: TONE_HEX[k.tone ?? 'ink'] }}>
             {k.value}
@@ -137,7 +137,7 @@ export function ReportBlocks({ blocks }: { blocks: ReportBlock[] }) {
             <div
               key={i}
               className="rounded-2xl border-l-4 bg-white p-4 text-sm"
-              style={{ borderColor: TONE_HEX[b.tone ?? 'info'], color: '#1A1816' }}
+              style={{ borderColor: TONE_HEX[b.tone ?? 'info'], color: '#F2F5F8' }}
             >
               {b.text}
             </div>

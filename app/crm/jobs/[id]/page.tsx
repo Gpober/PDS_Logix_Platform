@@ -66,7 +66,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               className={
                 'rounded-full border px-3 py-1.5 text-sm ' +
                 (job.status === s
-                  ? 'border-ink bg-ink text-ivory'
+                  ? 'border-ink bg-tulip text-ivory'
                   : 'border-line hover:border-ink')
               }
             >
@@ -130,7 +130,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           action={sendJobToQuickBooks.bind(null, id)}
           className="flex items-center gap-3 rounded-2xl border border-line bg-white p-5"
         >
-          <button className="rounded-full bg-ink px-5 py-2.5 text-sm text-ivory hover:bg-tulip">
+          <button className="rounded-full bg-tulip px-5 py-2.5 text-sm text-ivory hover:bg-tulip-dark">
             Send to QuickBooks
           </button>
           <span className="text-sm text-stone">

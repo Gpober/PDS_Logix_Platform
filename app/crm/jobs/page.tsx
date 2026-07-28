@@ -32,7 +32,7 @@ export default async function JobsPage({
           href="/crm/jobs"
           className={
             'rounded-full border px-3 py-1.5 text-sm ' +
-            (!active ? 'border-ink bg-ink text-ivory' : 'border-line hover:border-ink')
+            (!active ? 'border-ink bg-tulip text-ivory' : 'border-line hover:border-ink')
           }
         >
           All
@@ -43,7 +43,7 @@ export default async function JobsPage({
             href={`/crm/jobs?status=${s}`}
             className={
               'rounded-full border px-3 py-1.5 text-sm ' +
-              (active === s ? 'border-ink bg-ink text-ivory' : 'border-line hover:border-ink')
+              (active === s ? 'border-ink bg-tulip text-ivory' : 'border-line hover:border-ink')
             }
           >
             {STATUS_LABELS[s]}

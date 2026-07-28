@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 80" fill="none" role="img" aria-label="Pride Dealer Services crest">
+  <!-- Placeholder crest for Pride Dealer Services. White on transparent so it
+       sits on the dark header. Swap this file for the real crest (keep the
+       filename /pds-crest.svg) and nothing else needs to change. -->
+  <g fill="#F2F5F8">
+    <!-- Crown -->
+    <path d="M18 12 L22 5 L26 11 L32 3 L38 11 L42 5 L46 12 L44 16 L20 16 Z"/>
+    <circle cx="22" cy="4.5" r="1.6"/>
+    <circle cx="32" cy="2.5" r="1.8"/>
+    <circle cx="42" cy="4.5" r="1.6"/>
+  </g>
+  <!-- Shield -->
+  <path d="M14 18 H50 V44 C50 58 40 66 32 71 C24 66 14 58 14 44 Z"
+        fill="none" stroke="#F2F5F8" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Stylized rearing horse silhouette inside the shield -->
+  <path fill="#F2F5F8" d="M40 27
+    c-1.6-1.2-3.4-1.6-4.2-3.2 -0.5-1-1.6-0.7-1.9 0.2 -0.3 1 0.4 1.9 1.2 2.6
+    -2.1 0.2-4 1.3-5.4 3.1 -1.1 1.4-2.6 1.8-4.2 2.1 -1.4 0.3-2.1 1.1-2.1 2.4
+    0 0.9 0.7 1.4 1.5 1.2 0.9-0.2 1.4-0.9 2.3-1 -0.6 1.6-1.9 2.7-2.2 4.4
+    -0.4 2.1 0.2 4.1 1.1 6 0.4 0.9 1.3 1 1.9 0.3 0.5-0.6 0.3-1.3 0.1-2
+    -0.5-1.6-0.6-3.1 0.3-4.6 0.7 1.3 0.8 2.7 1.1 4.1 0.4 1.7 0.9 3.4 2.4 4.6
+    0.7 0.6 1.6 0.3 1.9-0.5 0.3-0.8-0.1-1.4-0.5-2 -1-1.5-1.3-3.2-1.4-5
+    1.7 0.9 3.1 2.2 4.9 2.9 0.9 0.4 1.7-0.1 1.8-1 0.1-0.8-0.4-1.3-1.1-1.6
+    -1.9-0.8-3.4-2.1-4.7-3.7 1.3-1.9 1.9-4 2.1-6.3 0.1-1 0.6-1.7 1.5-2.1
+    0.8-0.4 1.2-1.1 0.9-2 -0.3-0.9-1.1-1.1-1.9-0.7z"/>
+</svg>

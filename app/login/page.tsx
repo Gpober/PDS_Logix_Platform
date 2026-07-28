@@ -33,6 +33,8 @@ function LoginForm() {
   return (
     <form onSubmit={handleSubmit} className="w-full max-w-sm">
       <div className="text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/pds-crest.svg" alt="" className="mx-auto mb-4 h-14 w-14" />
         <span className="font-display text-3xl">
           PDS Logix<span className="text-tulip">.</span>
         </span>
@@ -72,7 +74,7 @@ function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-full bg-ink px-6 py-3 text-ivory transition-colors hover:bg-tulip disabled:opacity-60"
+        className="w-full rounded-full bg-tulip px-6 py-3 text-ivory transition-colors hover:bg-tulip-dark disabled:opacity-60"
       >
         {loading ? 'Signing in…' : 'Sign in'}
       </button>

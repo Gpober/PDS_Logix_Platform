@@ -29,7 +29,7 @@ export function CrmNav({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             className={
               'w-full rounded-full px-4 py-2 text-sm transition-colors ' +
-              (active ? 'bg-ink text-ivory' : 'text-stone hover:bg-blush/60')
+              (active ? 'bg-tulip text-ivory' : 'text-stone hover:bg-blush/60')
             }
           >
             {t.label}
