@@ -1,0 +1,388 @@
+import { NextResponse } from 'next/server';
+import { getCurrentProfile, listClients } from '@/lib/crm/data';
+import { createServerSupabase } from '@/lib/supabase/server';
+import { assetLabel, SERVICE_LABELS, SERVICE_TYPES, JOB_STATUSES, type ServiceType } from '@/lib/crm/types';
+import {
+  qboConfigured,
+  ensureCustomer,
+  ensureVendor,
+  createInvoice,
+  createBill,
+  updateInvoiceFields,
+  deleteInvoiceById,
+} from '@/lib/integrations/quickbooks';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+const usd = (n: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+const norm = (s: string) => s.trim().toLowerCase();
+const isDay = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+const clean = (v: unknown): string | null => {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s ? s : null;
+};
+const notConfigured = () =>
+  NextResponse.json({ ok: false, error: 'QuickBooks isn’t connected — connect it in Settings first.' });
+
+// Resolve a client by name (fuzzy) to its row, or return null + candidates.
+async function findClient(query: string) {
+  const all = await listClients();
+  const q = norm(query);
+  const hit =
+    all.find((c) => norm(c.name) === q) ??
+    all.find((c) => norm(c.name).startsWith(q)) ??
+    all.find((c) => norm(c.name).includes(q));
+  return { hit, candidates: all.filter((c) => norm(c.name).includes(q)).slice(0, 6).map((c) => c.name) };
+}
+
+// Executes a Zordon action ONLY after the human confirmed it in the UI. The
+// model never reaches here — the browser posts the confirmed proposal. Owner/
+// admin only. Each action mirrors the CRM's own write paths.
+export async function POST(req: Request) {
+  const profile = await getCurrentProfile();
+  const isOwner = profile?.role === 'owner' || profile?.role === 'admin';
+  if (!isOwner) return NextResponse.json({ ok: false, error: 'Owner/admin only.' }, { status: 403 });
+
+  let body: { kind?: string; input?: Record<string, unknown> };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: 'Invalid request.' }, { status: 400 });
+  }
+  const kind = body.kind;
+  const input = body.input ?? {};
+  const supabase = await createServerSupabase();
+
+  try {
+    // ---- CRM writes --------------------------------------------------------
+    if (kind === 'create_client') {
+      const name = clean(input.name);
+      if (!name) return NextResponse.json({ ok: false, error: 'A client name is required.' });
+      const { data, error } = await supabase
+        .from('clients')
+        .insert({
+          name,
+          category: clean(input.category),
+          billing_email: clean(input.billing_email),
+          phone: clean(input.phone),
+          address: clean(input.address),
+          notes: clean(input.notes),
+        })
+        .select('id')
+        .single();
+      if (error) return NextResponse.json({ ok: false, error: error.message });
+      return NextResponse.json({ ok: true, message: `Client “${name}” created.`, id: (data as { id: string }).id });
+    }
+
+    if (kind === 'create_contact') {
+      const name = clean(input.name);
+      if (!name) return NextResponse.json({ ok: false, error: 'A contact name is required.' });
+      const { hit, candidates } = await findClient(String(input.client ?? ''));
+      if (!hit) return NextResponse.json({ ok: false, error: `No client matched “${input.client}”.${candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''}` });
+      const { error } = await supabase.from('contacts').insert({
+        client_id: hit.id,
+        name,
+        title: clean(input.title),
+        email: clean(input.email),
+        phone: clean(input.phone),
+      });
+      if (error) return NextResponse.json({ ok: false, error: error.message });
+      return NextResponse.json({ ok: true, message: `Added ${name} to ${hit.name}.` });
+    }
+
+    if (kind === 'create_asset') {
+      const { hit, candidates } = await findClient(String(input.client ?? ''));
+      if (!hit) return NextResponse.json({ ok: false, error: `No client matched “${input.client}”.${candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''}` });
+      const year = Number.isFinite(Number(input.year)) ? Math.trunc(Number(input.year)) : null;
+      const mileage = Number.isFinite(Number(input.mileage)) ? Math.trunc(Number(input.mileage)) : null;
+      const { error } = await supabase.from('assets').insert({
+        client_id: hit.id,
+        asset_type: 'vehicle',
+        year,
+        make: clean(input.make),
+        model: clean(input.model),
+        vin: clean(input.vin),
+        license_plate: clean(input.license_plate),
+        color: clean(input.color),
+        mileage,
+        notes: clean(input.notes),
+      });
+      if (error) return NextResponse.json({ ok: false, error: error.message });
+      const label = assetLabel({ year, make: clean(input.make), model: clean(input.model), vin: clean(input.vin) });
+      return NextResponse.json({ ok: true, message: `Added ${label} to ${hit.name}.` });
+    }
+
+    if (kind === 'create_job') {
+      const service_type = SERVICE_TYPES.includes(input.service_type as ServiceType)
+        ? (input.service_type as ServiceType)
+        : null;
+      if (!service_type) return NextResponse.json({ ok: false, error: 'A valid service_type is required.' });
+      const { hit, candidates } = await findClient(String(input.client ?? ''));
+      if (!hit) return NextResponse.json({ ok: false, error: `No client matched “${input.client}”.${candidates.length ? ` Did you mean: ${candidates.join(', ')}?` : ''}` });
+      const status = JOB_STATUSES.includes(String(input.status) as never) ? String(input.status) : 'requested';
+      const { data, error } = await supabase
+        .from('jobs')
+        .insert({
+          client_id: hit.id,
+          service_type,
+          status,
+          scheduled_date: isDay(input.scheduled_date) ? input.scheduled_date : null,
+          location: clean(input.location),
+          notes: clean(input.notes),
+        })
+        .select('id')
+        .single();
+      if (error) return NextResponse.json({ ok: false, error: error.message });
+      const jobId = (data as { id: string }).id;
+      const price = Number.isFinite(Number(input.price)) ? Number(input.price) : null;
+      const cost = Number.isFinite(Number(input.cost)) ? Number(input.cost) : null;
+      if (price !== null || cost !== null) {
+        await supabase.from('job_pricing').upsert({ job_id: jobId, price, cost });
+      }
+      return NextResponse.json({
+        ok: true,
+        message: `${SERVICE_LABELS[service_type]} job created for ${hit.name}${price != null ? ` · ${usd(price)}` : ''}.`,
+        id: jobId,
+      });
+    }
+
+    if (kind === 'update_job') {
+      const id = clean(input.id);
+      if (!id) return NextResponse.json({ ok: false, error: 'A job id is required.' });
+      const patch: Record<string, unknown> = {};
+      if (JOB_STATUSES.includes(String(input.status) as never)) {
+        patch.status = String(input.status);
+        if (input.status === 'completed') patch.completed_date = new Date().toISOString().slice(0, 10);
+      }
+      if (Object.keys(patch).length) {
+        const { error } = await supabase.from('jobs').update(patch).eq('id', id);
+        if (error) return NextResponse.json({ ok: false, error: error.message });
+      }
+      const price = Number.isFinite(Number(input.price)) ? Number(input.price) : null;
+      const cost = Number.isFinite(Number(input.cost)) ? Number(input.cost) : null;
+      if (input.price != null || input.cost != null) {
+        const { error } = await supabase.from('job_pricing').upsert({ job_id: id, price, cost });
+        if (error) return NextResponse.json({ ok: false, error: error.message });
+      }
+      const bits = [
+        patch.status ? `status → ${patch.status}` : null,
+        input.price != null ? `price → ${usd(price ?? 0)}` : null,
+        input.cost != null ? `cost → ${usd(cost ?? 0)}` : null,
+      ].filter(Boolean);
+      if (!bits.length) return NextResponse.json({ ok: false, error: 'Nothing to change — give a status, price, or cost.' });
+      return NextResponse.json({ ok: true, message: `Job updated (${bits.join(', ')}).` });
+    }
+
+    // ---- QuickBooks writes -------------------------------------------------
+    if (kind === 'invoice_job') {
+      if (!qboConfigured()) return notConfigured();
+      const id = clean(input.id);
+      if (!id) return NextResponse.json({ ok: false, error: 'A job id is required.' });
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('id, service_type, qbo_invoice_id, clients(id, name, qbo_customer_id), assets(year, make, model, vin), job_pricing(price)')
+        .eq('id', id)
+        .maybeSingle();
+      if (error) return NextResponse.json({ ok: false, error: error.message });
+      const job = data as {
+        id: string;
+        service_type: ServiceType;
+        qbo_invoice_id: string | null;
+        clients: { id: string; name: string; qbo_customer_id: string | null } | null;
+        assets: { year: number | null; make: string | null; model: string | null; vin: string | null } | null;
+        job_pricing: { price: number | null } | null;
+      } | null;
+      if (!job) return NextResponse.json({ ok: false, error: 'Job not found.' });
+      if (job.qbo_invoice_id) return NextResponse.json({ ok: false, error: 'This job already has a QuickBooks invoice.' });
+      if (!job.clients) return NextResponse.json({ ok: false, error: 'Add a client to this job before invoicing.' });
+      const price = Number(job.job_pricing?.price ?? 0);
+      if (!price) return NextResponse.json({ ok: false, error: 'Set a price on this job before invoicing it.' });
+
+      let customerId = job.clients.qbo_customer_id;
+      if (!customerId) {
+        customerId = await ensureCustomer(job.clients.name);
+        await supabase.from('clients').update({ qbo_customer_id: customerId }).eq('id', job.clients.id);
+      }
+      const asset = job.assets ? assetLabel(job.assets) : null;
+      const description = [SERVICE_LABELS[job.service_type], asset].filter(Boolean).join(' — ');
+      const invoice = await createInvoice(customerId, price, description);
+      await supabase
+        .from('jobs')
+        .update({
+          qbo_invoice_id: invoice.invoiceId,
+          qbo_invoice_status: invoice.status,
+          qbo_balance: invoice.balance,
+          qbo_synced_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+      return NextResponse.json({ ok: true, message: `Invoiced ${job.clients.name} — ${usd(price)} in QuickBooks (saved, not emailed).` });
+    }
+
+    if (kind === 'create_invoice') {
+      if (!qboConfigured()) return notConfigured();
+      const customer = clean(input.customer);
+      const amount = Number(input.amount);
+      if (!customer) return NextResponse.json({ ok: false, error: 'A customer name is required.' });
+      if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ ok: false, error: 'A positive amount is required.' });
+      const customerId = await ensureCustomer(customer);
+      const invoice = await createInvoice(customerId, amount, clean(input.description) ?? 'Services');
+      return NextResponse.json({
+        ok: true,
+        message: `Invoice created in QuickBooks — ${usd(amount)} to ${customer}. Saved in QBO, not emailed.`,
+        id: invoice.invoiceId,
+      });
+    }
+
+    if (kind === 'create_bill') {
+      if (!qboConfigured()) return notConfigured();
+      const vendor = clean(input.vendor);
+      const amount = Number(input.amount);
+      if (!vendor) return NextResponse.json({ ok: false, error: 'A vendor name is required.' });
+      if (!Number.isFinite(amount) || amount <= 0) return NextResponse.json({ ok: false, error: 'A positive amount is required.' });
+      const vendorId = await ensureVendor(vendor);
+      const bill = await createBill({
+        vendorId,
+        amount,
+        description: clean(input.description) ?? undefined,
+        accountName: clean(input.account) ?? undefined,
+        docNumber: clean(input.bill_number) ?? undefined,
+        txnDate: isDay(input.bill_date) ? input.bill_date : undefined,
+        dueDate: isDay(input.due_date) ? input.due_date : undefined,
+      });
+      const num = bill.number ? ` #${bill.number}` : '';
+      return NextResponse.json({ ok: true, message: `Bill${num} created in QuickBooks — ${usd(amount)} to ${vendor}.` });
+    }
+
+    if (kind === 'update_invoice') {
+      if (!qboConfigured()) return notConfigured();
+      const invoiceNumber = clean(input.invoice_number);
+      if (!invoiceNumber) return NextResponse.json({ ok: false, error: 'An invoice number is required.' });
+      const txnDate = isDay(input.date) ? input.date : undefined;
+      const dueDate = isDay(input.due_date) ? input.due_date : undefined;
+      const customerName = clean(input.customer) ?? undefined;
+      if (!txnDate && !dueDate && !customerName) {
+        return NextResponse.json({ ok: false, error: 'Nothing to change — give a new date and/or customer.' });
+      }
+      const res = await updateInvoiceFields(invoiceNumber, { txnDate, dueDate, customerName });
+      if (!res.ok) return NextResponse.json({ ok: false, error: res.reason });
+      const bits = [
+        txnDate ? `date → ${res.invoice.txnDate ?? txnDate}` : null,
+        customerName ? `customer → ${res.invoice.customer ?? customerName}` : null,
+      ].filter(Boolean);
+      return NextResponse.json({ ok: true, message: `Invoice #${res.invoice.number ?? invoiceNumber} updated (${bits.join(', ')}).` });
+    }
+
+    if (kind === 'delete_invoices') {
+      if (!qboConfigured()) return notConfigured();
+      const list = Array.isArray(input.invoices) ? (input.invoices as Record<string, unknown>[]) : [];
+      const ids = Array.from(new Set(list.map((i) => String(i.id ?? '').trim()).filter(Boolean)));
+      if (!ids.length) return NextResponse.json({ ok: false, error: 'No invoices to delete.' });
+      let deleted = 0;
+      let skippedPaid = 0;
+      let notFound = 0;
+      const errors: string[] = [];
+      for (const id of ids) {
+        try {
+          const r = await deleteInvoiceById(id);
+          if (r === 'deleted') deleted += 1;
+          else if (r === 'skipped_paid') skippedPaid += 1;
+          else notFound += 1;
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : 'delete failed');
+        }
+      }
+      const parts = [`Deleted ${deleted} duplicate invoice${deleted === 1 ? '' : 's'} in QuickBooks`];
+      if (skippedPaid) parts.push(`${skippedPaid} skipped (paid — left alone)`);
+      if (notFound) parts.push(`${notFound} not found`);
+      if (errors.length) parts.push(`${errors.length} error${errors.length === 1 ? '' : 's'} — ${errors.slice(0, 3).join('; ')}`);
+      return NextResponse.json({ ok: true, message: parts.join(' · ') + '.' });
+    }
+
+    // ---- Bulk contact import ----------------------------------------------
+    if (kind === 'import_contacts') {
+      const list = Array.isArray(input.contacts) ? (input.contacts as Record<string, unknown>[]) : [];
+      if (!list.length) return NextResponse.json({ ok: false, error: 'No contacts to import.' });
+
+      // Preload existing contacts so we only add the missing ones (idempotent).
+      const existingEmails = new Set<string>();
+      const existingNameKeys = new Set<string>();
+      {
+        const { data } = await supabase.from('contacts').select('client_id, name, email');
+        for (const row of (data ?? []) as { client_id: string | null; name: string | null; email: string | null }[]) {
+          const e = String(row.email ?? '').trim().toLowerCase();
+          if (e) existingEmails.add(e);
+          const nm = String(row.name ?? '').trim().toLowerCase();
+          const cid = String(row.client_id ?? '');
+          if (nm && cid) existingNameKeys.add(`${cid}::${nm}`);
+        }
+      }
+
+      const clientIdByName = new Map<string, string>();
+      let clientsCreated = 0;
+      let contactsCreated = 0;
+      let alreadyPresent = 0;
+      const skipped: string[] = [];
+
+      for (const c of list.slice(0, 5000)) {
+        const clientName = String(c.company ?? '').trim();
+        const contactName = String(c.name ?? '').trim();
+        if (!clientName && !contactName) continue;
+
+        let clientId: string | undefined;
+        if (clientName) {
+          const key = clientName.toLowerCase();
+          clientId = clientIdByName.get(key);
+          if (!clientId) {
+            const { data: found } = await supabase.from('clients').select('id').ilike('name', clientName).limit(1).maybeSingle();
+            clientId = (found as { id: string } | null)?.id ?? undefined;
+            if (!clientId) {
+              const { data: created } = await supabase.from('clients').insert({ name: clientName }).select('id').single();
+              clientId = (created as { id: string } | null)?.id ?? undefined;
+              if (clientId) clientsCreated += 1;
+            }
+            if (clientId) clientIdByName.set(key, clientId);
+          }
+        }
+        if (!clientId) {
+          skipped.push(contactName || clientName || 'row');
+          continue;
+        }
+
+        const email = String(c.email ?? '').trim();
+        const emailKey = email.toLowerCase();
+        const nameKey = `${clientId}::${contactName.toLowerCase()}`;
+        const already = (emailKey && existingEmails.has(emailKey)) || (!email && contactName && existingNameKeys.has(nameKey));
+        if (already) {
+          alreadyPresent += 1;
+          continue;
+        }
+
+        const { error } = await supabase.from('contacts').insert({
+          client_id: clientId,
+          name: contactName || email || 'Contact',
+          email: email || null,
+          phone: c.phone ? String(c.phone).trim() : null,
+          title: c.title ? String(c.title).trim() : null,
+        });
+        if (error) skipped.push(contactName || clientName);
+        else {
+          contactsCreated += 1;
+          if (emailKey) existingEmails.add(emailKey);
+          if (contactName) existingNameKeys.add(nameKey);
+        }
+      }
+
+      const parts = [`Imported ${contactsCreated} new contact${contactsCreated === 1 ? '' : 's'}`];
+      if (clientsCreated) parts.push(`created ${clientsCreated} new client${clientsCreated === 1 ? '' : 's'}`);
+      if (alreadyPresent) parts.push(`${alreadyPresent} already in the CRM (skipped)`);
+      if (skipped.length) parts.push(`${skipped.length} couldn't be added`);
+      return NextResponse.json({ ok: true, message: parts.join(' · ') + '.' });
+    }
+
+    return NextResponse.json({ ok: false, error: 'Unknown action.' }, { status: 400 });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : 'Action failed.' }, { status: 500 });
+  }
+}

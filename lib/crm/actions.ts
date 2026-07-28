@@ -312,3 +312,41 @@ export async function deleteLead(id: string) {
   revalidatePath('/crm/leads');
   redirect('/crm/leads');
 }
+
+// ---- Assistant: team runs & reports ----------------------------------------
+
+// Enqueue a background team run — the Railway worker claims it and works
+// Zordon's crew over a business snapshot, writing results back. Owner/admin.
+export async function startTeamRun(form: FormData) {
+  const brief = str(form, 'scope');
+  if (!brief) throw new Error('Give the team a brief.');
+  const supabase = await createServerSupabase();
+  const { error } = await supabase.from('team_runs').insert({ scope: brief });
+  if (error) throw new Error(error.message);
+  revalidatePath('/crm/assistant/team');
+}
+
+export async function removeTeamRun(form: FormData) {
+  const id = str(form, 'id');
+  if (!id) return;
+  const supabase = await createServerSupabase();
+  await supabase.from('team_runs').delete().eq('id', id);
+  revalidatePath('/crm/assistant/team');
+}
+
+export async function deleteAssistantReport(form: FormData) {
+  const id = str(form, 'id');
+  if (!id) return;
+  const supabase = await createServerSupabase();
+  await supabase.from('assistant_reports').delete().eq('id', id);
+  revalidatePath('/crm/assistant/reports');
+  redirect('/crm/assistant/reports');
+}
+
+export async function forgetMemory(form: FormData) {
+  const id = str(form, 'id');
+  if (!id) return;
+  const supabase = await createServerSupabase();
+  await supabase.from('assistant_memory').delete().eq('id', id);
+  revalidatePath('/crm/assistant/memory');
+}

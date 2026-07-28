@@ -1,0 +1,24 @@
+# Railway service config for the Zordon operations-team WORKER (not the web app).
+#
+# Point a Railway service at this repo and set its Config-as-code path to
+# `worker/railway.toml` (or set the start command below manually). It builds the
+# worker image and runs the background worker — no HTTP port; it polls the
+# team_runs queue in Supabase. The WEB app is a SEPARATE deploy (Vercel).
+#
+# Required env vars on the Railway service:
+#   ANTHROPIC_API_KEY
+#   SUPABASE_URL              (or NEXT_PUBLIC_SUPABASE_URL)
+#   SUPABASE_SERVICE_ROLE_KEY
+# Optional:
+#   POLL_INTERVAL_MS          (default 5000; always-on mode only)
+#   RUN_ONCE=true             (cron mode: drain the queue once and exit — pair it
+#                              with a Cron Schedule in the Railway service settings,
+#                              e.g. */5 * * * *, for a cheaper scheduled worker)
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "worker/Dockerfile"
+
+[deploy]
+startCommand = "npx tsx worker/index.ts"
+restartPolicyType = "always"
