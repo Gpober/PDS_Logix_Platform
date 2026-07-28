@@ -15,6 +15,8 @@ export function CrmSidebar({ menuExtras }: { menuExtras?: React.ReactNode }) {
       onClick={() => setOpen(false)}
       className="flex items-center gap-2 px-2 font-display text-xl"
     >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/pds-crest.svg" alt="" className="h-7 w-7 shrink-0" />
       PDS Logix<span className="text-tulip">.</span>{' '}
       <span className="font-sans text-sm text-stone">CRM</span>
     </Link>
