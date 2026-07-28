@@ -32,6 +32,18 @@ const ORG_ID = process.env.PDS_BOOKS_ORG_ID; // optional single-org scope
 // org-scoped; defaults to PDS Logix but can be overridden by PDS_BOOKS_ORG_ID.
 const RPC_ORG = ORG_ID ?? 'ba5ac7ab-ff03-42c8-9e63-3a5a444449ca';
 
+// Cash anchor for the cash-flow statement's absolute balance. A couple of old
+// bank accounts in the ledger are missing their pre-2020 opening balances, so a
+// raw all-time bank sum is off by a constant — the same reason the pdslogix.net
+// balance sheet uses a manual "beginning balance". Period cash MOVEMENT is exact,
+// so we anchor to one known-correct cash figure (QuickBooks' cash at this date)
+// and roll it forward with the exact ledger movement. Override via env if the
+// books are ever restated. Default: PDS's QBO cash at 2026-01-01.
+const CASH_ANCHOR_DATE = process.env.PDS_BOOKS_CASH_ANCHOR_DATE ?? '2026-01-01';
+const CASH_ANCHOR_AMOUNT = process.env.PDS_BOOKS_CASH_ANCHOR_AMOUNT != null
+  ? Number(process.env.PDS_BOOKS_CASH_ANCHOR_AMOUNT)
+  : 92885.90;
+
 export function booksConfigured(): boolean {
   return Boolean(URL && KEY);
 }
@@ -123,6 +135,12 @@ function periodLabel(from: string, to: string): string {
     return `${mo} ${s.getUTCDate()}–${e.getUTCDate()}, ${e.getUTCFullYear()}`;
   }
   return `${fullDate(s)} – ${fullDate(e)}`;
+}
+
+function dayBefore(d: string): string {
+  const dt = new Date(`${d}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
 }
 
 // Page through a filtered select (Supabase caps a response at 1000 rows).
@@ -511,10 +529,26 @@ export interface CashFlowStatement {
   financing: number;
   transfer: number;
   netChange: number;
+  cashAtBeginning: number | null; // null when the period predates the cash anchor
+  cashAtEnd: number | null;
   operatingInflows: CashFlowLine[];
   operatingOutflows: CashFlowLine[];
   investingLines: CashFlowLine[];
   financingLines: CashFlowLine[];
+}
+
+// Net cash movement (Σ debit − credit on cash/bank lines) over an inclusive date
+// range. Used to roll the cash anchor forward to a period's begin/end balance.
+async function sumCashMovement(fromInclusive: string, toInclusive: string): Promise<number> {
+  if (toInclusive < fromInclusive) return 0;
+  const rows = await fetchAll((lo, hi) =>
+    scoped(db().from('journal_entry_lines').select('debit,credit'))
+      .eq('is_cash_account', true)
+      .gte('date', fromInclusive)
+      .lte('date', toInclusive)
+      .range(lo, hi),
+  );
+  return rows.reduce((s, r) => s + num(r.debit) - num(r.credit), 0);
 }
 
 // A true Statement of Cash Flows for a period (direct/offset method). Defaults to
@@ -564,6 +598,18 @@ export async function getCashFlowStatement(range?: { from?: string; to?: string 
 
     const sortDesc = (m: Map<string, CashFlowLine>) => [...m.values()].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     const lines = sortDesc(perAccount);
+    const netChange = round2(operating + investing + financing + transfer);
+
+    // Absolute cash begin/end: roll the known cash anchor forward with the exact
+    // ledger movement. Only when the period starts on/after the anchor date.
+    let cashAtBeginning: number | null = null;
+    let cashAtEnd: number | null = null;
+    if (Number.isFinite(CASH_ANCHOR_AMOUNT) && from! >= CASH_ANCHOR_DATE) {
+      const toBeginning = await sumCashMovement(CASH_ANCHOR_DATE, dayBefore(from!));
+      cashAtBeginning = round2(CASH_ANCHOR_AMOUNT + toBeginning);
+      cashAtEnd = round2(cashAtBeginning + netChange);
+    }
+
     return {
       status: 'ok',
       data: {
@@ -573,7 +619,9 @@ export async function getCashFlowStatement(range?: { from?: string; to?: string 
         investing: round2(investing),
         financing: round2(financing),
         transfer: round2(transfer),
-        netChange: round2(operating + investing + financing + transfer),
+        netChange,
+        cashAtBeginning,
+        cashAtEnd,
         operatingInflows: sortDesc(opInflow),
         operatingOutflows: sortDesc(opOutflow),
         investingLines: lines.filter((l) => l.section === 'investing'),

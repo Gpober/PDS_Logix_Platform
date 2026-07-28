@@ -770,10 +770,13 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
         financing: d.financing,
         ...(d.transfer ? { transfer: d.transfer } : {}),
         net_change_in_cash: d.netChange,
+        ...(d.cashAtBeginning != null ? { cash_at_beginning: d.cashAtBeginning, cash_at_end: d.cashAtEnd } : {}),
         operating_detail: { money_in: top(d.operatingInflows), money_out: top(d.operatingOutflows) },
         investing_detail: top(d.investingLines),
         financing_detail: top(d.financingLines),
-        note: 'Positive = cash in, negative = cash out. Bank-to-bank transfers net to zero. Absolute cash balance isn’t shown here — the ledger predates some accounts’ opening balances — but the period cash movement is exact.',
+        note: d.cashAtBeginning != null
+          ? 'Positive = cash in, negative = cash out. Bank-to-bank transfers net to zero. Cash at beginning/end is anchored to QuickBooks’ known cash balance and rolled forward with exact ledger movement.'
+          : 'Positive = cash in, negative = cash out. Bank-to-bank transfers net to zero. Absolute cash balance isn’t shown for periods before the cash anchor; the period cash movement is exact.',
         source: 'QuickBooks (PDS Logix books of record)',
       };
     }
