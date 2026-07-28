@@ -5,21 +5,30 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Tulips Talent brand palette: warm cream + dusty mauve-rose + warm black,
-        // with a muted sage (the tulip stem) as the secondary accent.
-        ivory: '#F7EFE3',
-        ink: '#1A1816',
-        tulip: '#BE9197',
-        'tulip-dark': '#9E6F76',
-        mauve: '#A6899A',
-        blush: '#EFE0DB',
-        sage: '#9CA891',
-        'sage-soft': '#DCE3D6',
-        stone: '#7C726C',
-        line: '#E7DBCD',
+        // Pride Dealer Services (pdslogix.net) brand: a dark, near-black
+        // industrial UI with an electric-cyan accent, white headings, and
+        // muted-gray body text. The token NAMES are kept (ink, ivory, tulip,
+        // …) so the whole app re-skins from here; only the values changed from
+        // the old light Tulips palette.
+        ivory: '#0A0C10', // page background (dark)
+        ink: '#F2F5F8', // primary text + light borders (was the dark text)
+        tulip: '#16B4E8', // electric-cyan accent — links, buttons, highlights
+        'tulip-dark': '#0E97C4', // cyan hover/pressed
+        mauve: '#16B4E8',
+        blush: '#141A21', // subtle raised surface / accent tint on dark
+        sage: '#16B4E8',
+        'sage-soft': '#141A21',
+        stone: '#9AA3AD', // muted body text
+        line: '#1C2128', // hairline borders on dark
+        // Override the default `white` so the many `bg-white` card surfaces
+        // become dark panels (there are no `text-white` usages, so this is
+        // safe). True white, when needed, is available as `#fff`.
+        white: '#0F1319',
       },
       fontFamily: {
-        display: ['var(--font-display)', 'Georgia', 'serif'],
+        // Bold geometric grotesque for headings (matches the PDS wordmark),
+        // clean sans for body.
+        display: ['var(--font-display)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
       },
       maxWidth: {

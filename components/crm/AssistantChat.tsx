@@ -445,7 +445,7 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
                 <div
                   className={
                     'max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm ' +
-                    (m.role === 'user' ? 'bg-ink text-ivory' : 'border border-line bg-white text-ink') +
+                    (m.role === 'user' ? 'bg-tulip text-ivory' : 'border border-line bg-white text-ink') +
                     (m.role === 'user' && !m.content && m.attachments?.length ? ' hidden' : '')
                   }
                 >
@@ -481,7 +481,7 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
               <button
                 type="button"
                 onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== k))}
-                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-ink text-xs text-ivory"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-tulip text-xs text-ivory"
                 aria-label="Remove attachment"
               >
                 ×
@@ -545,7 +545,7 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
         <button
           type="submit"
           disabled={busy || (!input.trim() && attachments.length === 0)}
-          className="rounded-full bg-ink px-5 py-2.5 text-sm text-ivory transition-opacity disabled:opacity-40"
+          className="rounded-full bg-tulip px-5 py-2.5 text-sm text-ivory transition-opacity disabled:opacity-40"
         >
           {busy ? '…' : 'Send'}
         </button>
@@ -716,7 +716,7 @@ function ActionCard({ action, onConfirm, onCancel }: { action: PendingAction; on
 
       {status === 'pending' && (
         <div className="mt-3 flex gap-2">
-          <button onClick={onConfirm} className="rounded-full bg-ink px-4 py-1.5 text-xs text-ivory hover:bg-tulip">Confirm</button>
+          <button onClick={onConfirm} className="rounded-full bg-tulip px-4 py-1.5 text-xs text-ivory hover:bg-tulip-dark">Confirm</button>
           <button onClick={onCancel} className="rounded-full border border-line px-4 py-1.5 text-xs text-stone hover:border-ink">Cancel</button>
         </div>
       )}

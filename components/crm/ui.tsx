@@ -15,7 +15,7 @@ export function CrmHeader({
       {newHref && (
         <Link
           href={newHref}
-          className="rounded-full bg-ink px-4 py-2 text-sm text-ivory transition-colors hover:bg-tulip"
+          className="rounded-full bg-tulip px-4 py-2 text-sm text-ivory transition-colors hover:bg-tulip-dark"
         >
           {newLabel ?? 'New'}
         </Link>
@@ -160,7 +160,7 @@ export function Select({
 export function SubmitBar({ label, cancelHref }: { label: string; cancelHref: string }) {
   return (
     <div className="flex items-center gap-3 pt-2">
-      <button className="rounded-full bg-ink px-6 py-2.5 text-sm text-ivory transition-colors hover:bg-tulip">
+      <button className="rounded-full bg-tulip px-6 py-2.5 text-sm text-ivory transition-colors hover:bg-tulip-dark">
         {label}
       </button>
       <Link href={cancelHref} className="text-sm text-stone hover:text-ink">

@@ -82,7 +82,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         <Field label="Title" name="title" />
         <Field label="Email" name="email" type="email" />
         <div className="flex items-end">
-          <button className="w-full rounded-full bg-ink px-4 py-2.5 text-sm text-ivory hover:bg-tulip">
+          <button className="w-full rounded-full bg-tulip px-4 py-2.5 text-sm text-ivory hover:bg-tulip-dark">
             Add contact
           </button>
         </div>

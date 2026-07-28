@@ -53,7 +53,7 @@ export default async function TimePage() {
       >
         <Select label="Staff member" name="staff_id" options={staffOpts} required placeholder="Select staff" />
         <Select label="Job (optional)" name="job_id" options={jobOpts} placeholder="No job" />
-        <button className="rounded-full bg-ink px-6 py-2.5 text-sm text-ivory hover:bg-tulip">
+        <button className="rounded-full bg-tulip px-6 py-2.5 text-sm text-ivory hover:bg-tulip-dark">
           Clock in
         </button>
       </form>

@@ -72,7 +72,7 @@ function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-full bg-ink px-6 py-3 text-ivory transition-colors hover:bg-tulip disabled:opacity-60"
+        className="w-full rounded-full bg-tulip px-6 py-3 text-ivory transition-colors hover:bg-tulip-dark disabled:opacity-60"
       >
         {loading ? 'Signing in…' : 'Sign in'}
       </button>

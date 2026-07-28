@@ -59,7 +59,7 @@ export function TeamRunsPanel({ initialRuns }: { initialRuns: TeamRun[] }) {
             </button>
           ))}
         </div>
-        <button className="rounded-full bg-ink px-5 py-2.5 text-sm text-ivory transition-opacity hover:opacity-90">
+        <button className="rounded-full bg-tulip px-5 py-2.5 text-sm text-ivory transition-opacity hover:opacity-90">
           Run the team
         </button>
         <p className="mt-2 text-xs text-stone">
