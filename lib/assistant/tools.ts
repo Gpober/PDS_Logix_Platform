@@ -42,6 +42,8 @@ import {
   getCashFlowStatement,
   getCompanyFinancials,
   getCustomerFinancials,
+  getFinancialsTrend,
+  type Granularity,
 } from '@/lib/integrations/pdsbooks';
 import { runSpecialist, SPECIALIST_KEYS } from './specialists';
 import { BUILD_REPORT_INPUT_SCHEMA, normalizeReportInput } from './reportBlocks';
@@ -254,6 +256,21 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
       properties: {
         from: { type: 'string', description: 'Period start YYYY-MM-DD (optional).' },
         to: { type: 'string', description: 'Period end YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'financials_trend',
+    description:
+      "P&L over TIME — the books sliced into a series of periods so you can trend or compare. Set granularity to 'month', 'quarter', or 'year'; each period returns revenue, COGS, gross profit, operating expenses, net income, and margins. THIS is how you build a year-by-month P&L, a quarterly comparison, or a revenue/net trend line — one call gives the whole series (feed it to build_report as a line or bar chart). Optionally filter to one client with `customer`, or set group_by_customer=true to also get each period broken down per client (revenue + net) for a stacked/grouped comparison. Scope the span with from/to (YYYY-MM-DD); omit for the current calendar year. Every period reconciles to financials/pnl_by_account for the same window.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        granularity: { type: 'string', enum: ['month', 'quarter', 'year'], description: "Period size (default 'month')." },
+        from: { type: 'string', description: 'Span start YYYY-MM-DD (optional; default Jan 1 of the current year).' },
+        to: { type: 'string', description: 'Span end YYYY-MM-DD (optional; default Dec 31 of the current year).' },
+        customer: { type: 'string', description: 'Optional: trend just this client (QuickBooks customer name; matches sub-customers).' },
+        group_by_customer: { type: 'boolean', description: 'Optional: also return each period split by client (revenue + net) for a per-client comparison over time.' },
       },
     },
   },
@@ -578,6 +595,7 @@ export const TOOL_LABELS: Record<string, string> = {
   financials: 'Reading the books',
   client_financials: 'Reading client profitability',
   pnl_by_account: 'Itemizing the P&L by account',
+  financials_trend: 'Trending the P&L over time',
   ar_aging: 'Aging receivables',
   cash_flow: 'Building the cash-flow statement',
   cash_calendar: 'Reading the cash calendar',
@@ -748,6 +766,39 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
           net_margin_pct: c.netMargin,
         })),
         note: "Per-customer P&L, ranked by revenue. 'Not specified' is overhead not tagged to a client. Names are QuickBooks names ('Parent:Sub' for sub-customers).",
+        source: 'QuickBooks (PDS Logix books of record)',
+      };
+    }
+
+    case 'financials_trend': {
+      const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const gran: Granularity = input.granularity === 'quarter' || input.granularity === 'year' ? input.granularity : 'month';
+      const customer = typeof input.customer === 'string' && input.customer.trim() ? input.customer.trim() : undefined;
+      const groupByCustomer = input.group_by_customer === true;
+      const res = await getFinancialsTrend(
+        { from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined },
+        gran,
+        { customer, groupByCustomer },
+      );
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      return {
+        granularity: d.granularity,
+        from: d.from, to: d.to,
+        ...(d.customer ? { customer: d.customer } : {}),
+        currency: 'USD',
+        periods: d.periods.map((p) => ({
+          period: p.period,
+          revenue: p.revenue,
+          cogs: p.cogs,
+          gross_profit: p.grossProfit,
+          operating_expenses: p.operatingExpenses,
+          net_income: p.netIncome,
+          net_margin_pct: p.netMargin,
+        })),
+        ...(d.byCustomer ? { by_customer: d.byCustomer.map((b) => ({ period: b.period, clients: b.customers.map((c) => ({ customer: c.customer, revenue: c.revenue, net_income: c.netIncome })) })) } : {}),
+        note: 'Each period reconciles to financials/pnl_by_account for that window. Feed this to build_report (line for trends, bar for period comparison).',
         source: 'QuickBooks (PDS Logix books of record)',
       };
     }

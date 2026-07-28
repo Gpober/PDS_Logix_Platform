@@ -50,6 +50,7 @@ const TOOL_LABELS: Record<string, string> = {
   financials: 'Reading the books',
   client_financials: 'Reading client profitability',
   pnl_by_account: 'Itemizing the P&L by account',
+  financials_trend: 'Trending the P&L over time',
   ar_aging: 'Aging receivables',
   cash_flow: 'Building the cash-flow statement',
   cash_calendar: 'Reading the cash calendar',

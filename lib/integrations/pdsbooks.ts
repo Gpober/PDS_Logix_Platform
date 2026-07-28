@@ -171,7 +171,7 @@ async function fetchPLLines(from: string, to: string): Promise<RawLine[]> {
     scoped(
       db()
         .from('journal_entry_lines')
-        .select('entry_number,customer,account,account_type,debit,credit,posting,type'),
+        .select('entry_number,customer,account,account_type,debit,credit,posting,type,date'),
     )
       .gte('date', from)
       .lte('date', to)
@@ -405,6 +405,104 @@ export async function getAccountBreakdown(range?: { from?: string; to?: string }
         subtotals,
       },
     };
+  } catch (e) {
+    return { status: 'error', message: e instanceof Error ? e.message : 'Could not read the books.' };
+  }
+}
+
+export type Granularity = 'month' | 'quarter' | 'year';
+
+// Which period a date falls in, plus a human label and the period's bounds.
+function periodBucket(dateStr: string, g: Granularity): { key: string; label: string; from: string; to: string } {
+  const y = Number(dateStr.slice(0, 4));
+  const m = Number(dateStr.slice(5, 7)); // 1-12
+  const monthName = (mm: number) => new Date(Date.UTC(y, mm - 1, 1)).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  const lastDay = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  if (g === 'year') return { key: `${y}`, label: `${y}`, from: `${y}-01-01`, to: `${y}-12-31` };
+  if (g === 'quarter') {
+    const q = Math.floor((m - 1) / 3) + 1;
+    const startM = (q - 1) * 3 + 1;
+    const endM = startM + 2;
+    return {
+      key: `${y}-Q${q}`, label: `Q${q} ${y}`,
+      from: `${y}-${String(startM).padStart(2, '0')}-01`,
+      to: `${y}-${String(endM).padStart(2, '0')}-${String(lastDay(y, endM)).padStart(2, '0')}`,
+    };
+  }
+  const mm = String(m).padStart(2, '0');
+  return { key: `${y}-${mm}`, label: `${monthName(m)} ${y}`, from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(lastDay(y, m)).padStart(2, '0')}` };
+}
+
+export interface TrendPeriod extends PnL { period: string; from: string; to: string }
+export interface CustomerTrendCell { customer: string; revenue: number; netIncome: number }
+export interface FinancialsTrend {
+  granularity: Granularity;
+  from: string;
+  to: string;
+  customer: string | null;
+  periods: TrendPeriod[];
+  byCustomer: { period: string; customers: CustomerTrendCell[] }[] | null;
+}
+
+// A P&L TIME SERIES — the same books, sliced by period (month / quarter / year)
+// across a range, so a report can trend over time. Optionally filter to one
+// customer, or set groupByCustomer to also get each period split by customer
+// (revenue + net). Every period folds from posting lines, so it reconciles to
+// the single-period tools. Defaults to the current calendar year.
+export async function getFinancialsTrend(
+  range?: { from?: string; to?: string },
+  granularity: Granularity = 'month',
+  opts?: { customer?: string; groupByCustomer?: boolean },
+): Promise<BooksResult<FinancialsTrend>> {
+  if (!booksConfigured()) return { status: 'not_configured' };
+  try {
+    let from = range?.from, to = range?.to;
+    if (!from || !to) {
+      const y = new Date().getUTCFullYear();
+      from = from ?? `${y}-01-01`;
+      to = to ?? `${y}-12-31`;
+    }
+    let lines = filterPosting(await fetchPLLines(from, to));
+    if (lines.length === 0 && !range?.from && !range?.to) {
+      const lm = await latestMonth();
+      if (lm) { from = `${lm.from.slice(0, 4)}-01-01`; to = `${lm.from.slice(0, 4)}-12-31`; lines = filterPosting(await fetchPLLines(from, to)); }
+    }
+    const needle = opts?.customer?.trim().toLowerCase();
+    if (needle) lines = lines.filter((l) => (l.customer ?? '').toLowerCase().includes(needle));
+
+    // Group lines by period key (skip lines with no P&L bucket to keep periods lean).
+    const meta = new Map<string, { label: string; from: string; to: string }>();
+    const byPeriod = new Map<string, RawLine[]>();
+    const byPeriodCustomer = new Map<string, Map<string, RawLine[]>>();
+    for (const l of lines) {
+      if (!bucket(l.account_type)) continue;
+      const date = l.date ?? undefined;
+      if (!date) continue;
+      const b = periodBucket(date, granularity);
+      if (!meta.has(b.key)) meta.set(b.key, { label: b.label, from: b.from, to: b.to });
+      (byPeriod.get(b.key) ?? byPeriod.set(b.key, []).get(b.key)!).push(l);
+      if (opts?.groupByCustomer) {
+        const cust = l.customer && l.customer.trim() ? l.customer.trim() : 'Not specified';
+        const cm = byPeriodCustomer.get(b.key) ?? byPeriodCustomer.set(b.key, new Map()).get(b.key)!;
+        (cm.get(cust) ?? cm.set(cust, []).get(cust)!).push(l);
+      }
+    }
+    const keys = [...meta.keys()].sort();
+    const periods: TrendPeriod[] = keys.map((k) => {
+      const m = meta.get(k)!;
+      return { period: m.label, from: m.from, to: m.to, ...foldPnL(byPeriod.get(k) ?? []) };
+    });
+    const byCustomer = opts?.groupByCustomer
+      ? keys.map((k) => ({
+          period: meta.get(k)!.label,
+          customers: [...(byPeriodCustomer.get(k) ?? new Map()).entries()]
+            .map(([customer, rows]) => { const p = foldPnL(rows); return { customer, revenue: p.revenue, netIncome: p.netIncome }; })
+            .filter((c) => c.revenue !== 0 || c.netIncome !== 0)
+            .sort((a, b) => b.revenue - a.revenue),
+        }))
+      : null;
+
+    return { status: 'ok', data: { granularity, from: from!, to: to!, customer: opts?.customer?.trim() || null, periods, byCustomer } };
   } catch (e) {
     return { status: 'error', message: e instanceof Error ? e.message : 'Could not read the books.' };
   }
