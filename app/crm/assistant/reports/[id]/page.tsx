@@ -4,6 +4,7 @@ import { getAssistantReport, getCurrentProfile } from '@/lib/crm/data';
 import { deleteAssistantReport } from '@/lib/crm/actions';
 import { CrmHeader, Empty } from '@/components/crm/ui';
 import { ReportBlocks } from '@/components/crm/ReportBlocks';
+import { PrintReportButton } from '@/components/crm/PrintReportButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,29 +28,34 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="mb-6 flex items-center justify-between gap-4">
+      <div className="no-print mb-6 flex items-center justify-between gap-4">
         <Link href="/crm/assistant/reports" className="text-sm text-stone hover:text-ink">
           ← Reports
         </Link>
-        <form action={deleteAssistantReport}>
-          <input type="hidden" name="id" value={report.id} />
-          <button className="rounded-full border border-line px-3 py-1.5 text-xs text-stone hover:border-tulip hover:text-tulip">
-            Delete
-          </button>
-        </form>
+        <div className="flex items-center gap-2">
+          <PrintReportButton />
+          <form action={deleteAssistantReport}>
+            <input type="hidden" name="id" value={report.id} />
+            <button className="rounded-full border border-line px-3 py-1.5 text-xs text-stone hover:border-tulip hover:text-tulip">
+              Delete
+            </button>
+          </form>
+        </div>
       </div>
 
-      <header className="mb-6 border-b border-line pb-4">
-        <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-stone">
-          <span className="font-medium text-tulip-dark">PDS Logix</span>
-          <span>Confidential</span>
-        </div>
-        <h1 className="mt-3 font-display text-3xl">{report.title}</h1>
-        {report.summary && <p className="mt-1 max-w-2xl text-stone">{report.summary}</p>}
-        <p className="mt-1 text-xs text-stone">{dateLabel}</p>
-      </header>
+      <div id="report-print-area">
+        <header className="mb-6 border-b border-line pb-4">
+          <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-stone">
+            <span className="font-medium text-tulip-dark">PDS Logix</span>
+            <span>Confidential</span>
+          </div>
+          <h1 className="mt-3 font-display text-3xl">{report.title}</h1>
+          {report.summary && <p className="mt-1 max-w-2xl text-stone">{report.summary}</p>}
+          <p className="mt-1 text-xs text-stone">{dateLabel}</p>
+        </header>
 
-      {report.blocks.length === 0 ? <Empty>This report has no content.</Empty> : <ReportBlocks blocks={report.blocks} />}
+        {report.blocks.length === 0 ? <Empty>This report has no content.</Empty> : <ReportBlocks blocks={report.blocks} />}
+      </div>
     </div>
   );
 }
