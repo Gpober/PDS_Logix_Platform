@@ -573,6 +573,59 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
       required: ['contacts'],
     },
   },
+  {
+    name: 'import_staff',
+    description:
+      "PROPOSE importing team members (staff) into the CRM from a Connecteam-style people export, then let the user confirm. If they ATTACHED a team/people sheet you'll see an '[Attached team sheet: …]' preview — the app already parsed every row, so call import_staff with an EMPTY staff array (staff: []); the app injects the rows. If they PASTED a short list, parse it yourself (name required; optional title, email, phone, active). IDEMPOTENT — only new people are added, matched by name/email. Never claim they're imported until the user confirms.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        staff: {
+          type: 'array',
+          description: 'The team members to import (leave empty for an attached sheet — the app injects the rows).',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              title: { type: 'string', description: 'Role / job title (optional).' },
+              email: { type: 'string' },
+              phone: { type: 'string' },
+              active: { type: 'boolean', description: 'Whether they are currently active (default true).' },
+            },
+            required: ['name'],
+          },
+        },
+      },
+      required: ['staff'],
+    },
+  },
+  {
+    name: 'import_time',
+    description:
+      "PROPOSE importing worked hours / time-clock shifts from a Connecteam-style time export, then let the user confirm. If they ATTACHED a time sheet you'll see an '[Attached time sheet: …]' preview — the app already parsed every row, so call import_time with an EMPTY entries array (entries: []); the app injects the rows. Each shift links to a team member by name (created if missing). A shift has an employee plus either clock in + clock out, or a date + total hours. IDEMPOTENT — deduped by employee + start time. Never claim they're imported until the user confirms.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        entries: {
+          type: 'array',
+          description: 'The shifts to import (leave empty for an attached sheet — the app injects the rows).',
+          items: {
+            type: 'object',
+            properties: {
+              employee: { type: 'string', description: 'Staff member name (matched, created if new).' },
+              date: { type: 'string', description: 'Shift date (e.g. 2026-07-15 or 07/15/2026).' },
+              clock_in: { type: 'string', description: 'Clock-in time or datetime (optional if hours given).' },
+              clock_out: { type: 'string', description: 'Clock-out time or datetime (optional if hours given).' },
+              hours: { type: 'string', description: 'Total hours worked (used when clock times are absent).' },
+              notes: { type: 'string', description: 'Job / shift note (optional).' },
+            },
+            required: ['employee'],
+          },
+        },
+      },
+      required: ['entries'],
+    },
+  },
 ];
 
 // UI labels (kept in sync with TOOL_LABELS in AssistantChat.tsx).
@@ -615,6 +668,8 @@ export const TOOL_LABELS: Record<string, string> = {
   update_invoice: 'Preparing an invoice fix',
   delete_invoices: 'Preparing an invoice cleanup',
   import_contacts: 'Preparing a contact import',
+  import_staff: 'Preparing a team import',
+  import_time: 'Preparing an hours import',
 };
 
 // Gated write tools — surfaced to the human for confirmation, never auto-run.
@@ -630,6 +685,8 @@ export const ACTION_TOOLS = [
   'update_invoice',
   'delete_invoices',
   'import_contacts',
+  'import_staff',
+  'import_time',
 ];
 
 // ---- dispatch ---------------------------------------------------------------
@@ -1021,6 +1078,8 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'update_invoice':
     case 'delete_invoices':
     case 'import_contacts':
+    case 'import_staff':
+    case 'import_time':
       return { error: 'This action must be confirmed by the user; it cannot run directly.' };
 
     default:

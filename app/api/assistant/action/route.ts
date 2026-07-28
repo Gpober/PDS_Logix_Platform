@@ -38,6 +38,83 @@ async function findClient(query: string) {
   return { hit, candidates: all.filter((c) => norm(c.name).includes(q)).slice(0, 6).map((c) => c.name) };
 }
 
+// ---- time-import parsing (Connecteam shifts → clock_in/clock_out) ----------
+
+// A date cell → YYYY-MM-DD (handles YYYY-MM-DD, MM/DD/YYYY, and common formats).
+function parseImportDate(s: string | null): string | null {
+  if (!s) return null;
+  const t = s.trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = t.match(/^(\d{1,2})[/](\d{1,2})[/](\d{2,4})/);
+  if (m) { const y = m[3].length === 2 ? `20${m[3]}` : m[3]; return `${y}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`; }
+  const d = new Date(t);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+// A time cell ("9:00 AM", "17:30", "9am") → minutes since midnight.
+function parseClockMinutes(s: string | null): number | null {
+  if (!s) return null;
+  const t = s.trim();
+  let m = t.match(/(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?/i);
+  if (m) {
+    let h = parseInt(m[1], 10); const min = parseInt(m[2], 10); const ap = (m[3] || '').toLowerCase();
+    if (ap.startsWith('p') && h < 12) h += 12;
+    if (ap.startsWith('a') && h === 12) h = 0;
+    return h * 60 + min;
+  }
+  m = t.match(/^(\d{1,2})\s*([ap]\.?m\.?)$/i);
+  if (m) { let h = parseInt(m[1], 10); const ap = m[2].toLowerCase(); if (ap.startsWith('p') && h < 12) h += 12; if (ap.startsWith('a') && h === 12) h = 0; return h * 60; }
+  return null;
+}
+
+// Hours worked ("8.5", "8:30", "8h 30m") → minutes.
+function parseHoursMinutes(s: string | null): number | null {
+  if (!s) return null;
+  const t = s.trim();
+  let m = t.match(/^(\d+):(\d{2})$/); if (m) return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  m = t.match(/(\d+)\s*h(?:ours?)?(?:\s*(\d+)\s*m)?/i); if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
+  const dec = parseFloat(t); return isNaN(dec) ? null : Math.round(dec * 60);
+}
+
+// A shift row → clock_in/clock_out ISO timestamps. UTC-labeled so the duration
+// (worked hours) is exact regardless of the source timezone. Handles clock
+// in+out, date+hours, overnight shifts, and full-datetime cells.
+function buildTimestamps(e: Record<string, unknown>): { clock_in: string; clock_out: string | null } | null {
+  const cin = clean(e.clock_in), cout = clean(e.clock_out), hrs = clean(e.hours);
+  const date = parseImportDate(clean(e.date)) ?? parseImportDate(cin);
+  const iso = (day: string, min: number) => `${day}T${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}:00.000Z`;
+  const inMin = parseClockMinutes(cin), outMin = parseClockMinutes(cout), hoursMin = parseHoursMinutes(hrs);
+
+  if (date && inMin != null) {
+    const clock_in = iso(date, inMin);
+    let end = outMin;
+    if (end == null && hoursMin != null) end = inMin + hoursMin;
+    let clock_out: string | null = null;
+    if (end != null) {
+      const inMs = new Date(clock_in).getTime();
+      let outMs = new Date(iso(date, end % (24 * 60))).getTime();
+      if (end >= 24 * 60 || outMs < inMs) outMs += 24 * 3600 * 1000; // overnight
+      clock_out = new Date(outMs).toISOString();
+    }
+    return { clock_in, clock_out };
+  }
+  if (date && hoursMin != null) {
+    const clock_in = iso(date, 8 * 60); // no start time given → synthesize an 8:00 start
+    return { clock_in, clock_out: new Date(new Date(clock_in).getTime() + hoursMin * 60000).toISOString() };
+  }
+  if (cin) {
+    const d = new Date(cin);
+    if (!isNaN(d.getTime())) {
+      let clock_out: string | null = null;
+      if (cout) { const o = new Date(cout); if (!isNaN(o.getTime())) clock_out = o.toISOString(); }
+      else if (hoursMin != null) clock_out = new Date(d.getTime() + hoursMin * 60000).toISOString();
+      return { clock_in: d.toISOString(), clock_out };
+    }
+  }
+  return null;
+}
+
 // Executes a Zordon action ONLY after the human confirmed it in the UI. The
 // model never reaches here — the browser posts the confirmed proposal. Owner/
 // admin only. Each action mirrors the CRM's own write paths.
@@ -379,6 +456,106 @@ export async function POST(req: Request) {
       const parts = [`Imported ${contactsCreated} new contact${contactsCreated === 1 ? '' : 's'}`];
       if (clientsCreated) parts.push(`created ${clientsCreated} new client${clientsCreated === 1 ? '' : 's'}`);
       if (alreadyPresent) parts.push(`${alreadyPresent} already in the CRM (skipped)`);
+      if (skipped.length) parts.push(`${skipped.length} couldn't be added`);
+      return NextResponse.json({ ok: true, message: parts.join(' · ') + '.' });
+    }
+
+    // ---- Team import (Connecteam people export → staff roster) -------------
+    if (kind === 'import_staff') {
+      const list = Array.isArray(input.staff) ? (input.staff as Record<string, unknown>[]) : [];
+      if (!list.length) return NextResponse.json({ ok: false, error: 'No team members to import.' });
+
+      const byName = new Set<string>();
+      const byEmail = new Set<string>();
+      {
+        const { data } = await supabase.from('staff').select('name, email');
+        for (const r of (data ?? []) as { name: string | null; email: string | null }[]) {
+          const n = String(r.name ?? '').trim().toLowerCase();
+          if (n) byName.add(n);
+          const e = String(r.email ?? '').trim().toLowerCase();
+          if (e) byEmail.add(e);
+        }
+      }
+
+      let created = 0;
+      let present = 0;
+      const skipped: string[] = [];
+      for (const s of list.slice(0, 5000)) {
+        const name = String(s.name ?? '').trim();
+        if (!name) continue;
+        const email = clean(s.email);
+        const emailKey = email?.toLowerCase();
+        if (byName.has(name.toLowerCase()) || (emailKey && byEmail.has(emailKey))) { present += 1; continue; }
+        const { error } = await supabase.from('staff').insert({
+          name,
+          email,
+          phone: clean(s.phone),
+          title: clean(s.title),
+          is_active: s.active === false ? false : true,
+        });
+        if (error) skipped.push(name);
+        else { created += 1; byName.add(name.toLowerCase()); if (emailKey) byEmail.add(emailKey); }
+      }
+
+      const parts = [`Imported ${created} new team member${created === 1 ? '' : 's'}`];
+      if (present) parts.push(`${present} already in the roster (skipped)`);
+      if (skipped.length) parts.push(`${skipped.length} couldn't be added`);
+      return NextResponse.json({ ok: true, message: parts.join(' · ') + '.' });
+    }
+
+    // ---- Hours import (Connecteam time-clock export → time_entries) --------
+    if (kind === 'import_time') {
+      const list = Array.isArray(input.entries) ? (input.entries as Record<string, unknown>[]) : [];
+      if (!list.length) return NextResponse.json({ ok: false, error: 'No shifts to import.' });
+
+      const staffByName = new Map<string, string>();
+      {
+        const { data } = await supabase.from('staff').select('id, name');
+        for (const r of (data ?? []) as { id: string; name: string | null }[]) {
+          const n = String(r.name ?? '').trim().toLowerCase();
+          if (n) staffByName.set(n, r.id);
+        }
+      }
+      // Preload existing shifts (staff + start) so re-imports don't double-count.
+      const existing = new Set<string>();
+      {
+        const { data } = await supabase.from('time_entries').select('staff_id, clock_in');
+        for (const r of (data ?? []) as { staff_id: string; clock_in: string }[]) {
+          existing.add(`${r.staff_id}::${new Date(r.clock_in).toISOString()}`);
+        }
+      }
+
+      let created = 0;
+      let dup = 0;
+      let staffCreated = 0;
+      const skipped: string[] = [];
+      for (const e of list.slice(0, 10000)) {
+        const emp = String(e.employee ?? '').trim();
+        if (!emp) continue;
+        let staffId = staffByName.get(emp.toLowerCase());
+        if (!staffId) {
+          const { data: made } = await supabase.from('staff').insert({ name: emp }).select('id').single();
+          staffId = (made as { id: string } | null)?.id ?? undefined;
+          if (staffId) { staffByName.set(emp.toLowerCase(), staffId); staffCreated += 1; }
+        }
+        if (!staffId) { skipped.push(emp); continue; }
+        const ts = buildTimestamps(e);
+        if (!ts) { skipped.push(emp); continue; }
+        const key = `${staffId}::${new Date(ts.clock_in).toISOString()}`;
+        if (existing.has(key)) { dup += 1; continue; }
+        const { error } = await supabase.from('time_entries').insert({
+          staff_id: staffId,
+          clock_in: ts.clock_in,
+          clock_out: ts.clock_out,
+          notes: clean(e.notes),
+        });
+        if (error) skipped.push(emp);
+        else { created += 1; existing.add(key); }
+      }
+
+      const parts = [`Imported ${created} shift${created === 1 ? '' : 's'}`];
+      if (staffCreated) parts.push(`added ${staffCreated} new team member${staffCreated === 1 ? '' : 's'}`);
+      if (dup) parts.push(`${dup} already imported (skipped)`);
       if (skipped.length) parts.push(`${skipped.length} couldn't be added`);
       return NextResponse.json({ ok: true, message: parts.join(' · ') + '.' });
     }
