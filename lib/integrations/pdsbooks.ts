@@ -28,6 +28,9 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const URL = process.env.PDS_BOOKS_SUPABASE_URL;
 const KEY = process.env.PDS_BOOKS_SUPABASE_KEY;
 const ORG_ID = process.env.PDS_BOOKS_ORG_ID; // optional single-org scope
+// The PDS Logix org id in the warehouse. Needed for the cash-flow RPC, which is
+// org-scoped; defaults to PDS Logix but can be overridden by PDS_BOOKS_ORG_ID.
+const RPC_ORG = ORG_ID ?? 'ba5ac7ab-ff03-42c8-9e63-3a5a444449ca';
 
 export function booksConfigured(): boolean {
   return Boolean(URL && KEY);
@@ -457,5 +460,127 @@ export async function getBooksFreshness(): Promise<BooksResult<{ asOf: string; l
     return { status: 'ok', data: { asOf: (latest as { date?: string } | null)?.date ?? '', lineCount: count ?? 0 } };
   } catch (e) {
     return { status: 'error', message: e instanceof Error ? e.message : 'Could not read the books.' };
+  }
+}
+
+// ---- Cash-flow statement (the direct / offset method — "our way") -----------
+// This is exactly how the I AM CFO and pdslogix.net cash-flow pages compute it:
+// take every journal entry that touches a Bank account, look at its OFFSETTING
+// (non-cash) lines, and read each line's cash_effect = credit − debit (a credit
+// on the offset = cash in). Group by the offset account, classify each account
+// into operating / investing / financing / transfer by its account_type. Pure
+// bank-to-bank transfers have no offset line, so they net to zero automatically.
+// We call the org's own get_cash_flow_offset_rows RPC so the math is identical
+// to the dashboards and reconciles to QuickBooks' Statement of Cash Flows.
+
+interface OffsetRow {
+  account: string | null;
+  account_type: string | null;
+  report_category: string | null;
+  cash_effect: number | null;
+  name?: string | null;
+}
+
+export type CashFlowSection = 'operating' | 'investing' | 'financing' | 'transfer';
+
+// classifyTransaction, ported from pdslogix's cash-flow page (credit cards →
+// financing, matching pdslogix — the platform variant puts them in operating).
+function classifySection(accountType: string | null, reportCategory: string | null): CashFlowSection {
+  if ((reportCategory ?? '').toLowerCase() === 'transfer') return 'transfer';
+  const at = (accountType ?? '').toLowerCase();
+  if (at.includes('accounts payable') || at.includes('a/p')) return 'operating';
+  if (at.includes('fixed asset') || at.includes('long term asset')) return 'investing';
+  if (at.includes('equity') || at.includes('long term liab') || at.includes('credit card') || at.includes('line of credit')) return 'financing';
+  return 'operating';
+}
+
+// Within operating, is this offset a cash inflow line (money in) vs outflow?
+function isOperatingInflow(accountType: string | null): boolean {
+  const at = (accountType ?? '').toLowerCase();
+  const payable = at.includes('accounts payable') || at.includes('a/p');
+  return (at.includes('income') || at.includes('current asset') || at.includes('accounts receivable') || at.includes('a/r')) && !payable;
+}
+
+export interface CashFlowLine { account: string; section: CashFlowSection; amount: number }
+export interface CashFlowStatement {
+  period: string;
+  from: string;
+  to: string;
+  operating: number;
+  investing: number;
+  financing: number;
+  transfer: number;
+  netChange: number;
+  operatingInflows: CashFlowLine[];
+  operatingOutflows: CashFlowLine[];
+  investingLines: CashFlowLine[];
+  financingLines: CashFlowLine[];
+}
+
+// A true Statement of Cash Flows for a period (direct/offset method). Defaults to
+// the current month, falling back to the most recent month with activity.
+export async function getCashFlowStatement(range?: { from?: string; to?: string }): Promise<BooksResult<CashFlowStatement>> {
+  if (!booksConfigured()) return { status: 'not_configured' };
+  try {
+    let from = range?.from, to = range?.to;
+    if (!from || !to) {
+      const r = monthRange(new Date());
+      from = from ?? r.from;
+      to = to ?? r.to;
+    }
+    const run = async (f: string, t: string): Promise<OffsetRow[]> => {
+      const { data, error } = await db().rpc('get_cash_flow_offset_rows', {
+        p_org_id: RPC_ORG, p_start_date: f, p_end_date: t, p_bank_account: null, p_properties: null,
+      });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as OffsetRow[];
+    };
+    let rows = await run(from!, to!);
+    if (rows.length === 0 && !range?.from && !range?.to) {
+      const lm = await latestMonth();
+      if (lm) { from = lm.from; to = lm.to; rows = await run(from, to); }
+    }
+
+    // Sum by account within each section (so we can show the drivers).
+    const perAccount = new Map<string, CashFlowLine>();
+    let operating = 0, investing = 0, financing = 0, transfer = 0;
+    const opInflow = new Map<string, CashFlowLine>();
+    const opOutflow = new Map<string, CashFlowLine>();
+    for (const r of rows) {
+      const amt = num(r.cash_effect);
+      const section = classifySection(r.account_type, r.report_category);
+      const account = (r.account && r.account.trim()) || r.account_type || 'Other';
+      if (section === 'operating') operating += amt;
+      else if (section === 'investing') investing += amt;
+      else if (section === 'financing') financing += amt;
+      else transfer += amt;
+
+      const bucket = section === 'operating' ? (isOperatingInflow(r.account_type) ? opInflow : opOutflow) : perAccount;
+      const key = `${section}:${account}`;
+      const existing = bucket.get(section === 'operating' ? account : key);
+      if (existing) existing.amount = round2(existing.amount + amt);
+      else bucket.set(section === 'operating' ? account : key, { account, section, amount: round2(amt) });
+    }
+
+    const sortDesc = (m: Map<string, CashFlowLine>) => [...m.values()].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const lines = sortDesc(perAccount);
+    return {
+      status: 'ok',
+      data: {
+        period: periodLabel(from!, to!),
+        from: from!, to: to!,
+        operating: round2(operating),
+        investing: round2(investing),
+        financing: round2(financing),
+        transfer: round2(transfer),
+        netChange: round2(operating + investing + financing + transfer),
+        operatingInflows: sortDesc(opInflow),
+        operatingOutflows: sortDesc(opOutflow),
+        investingLines: lines.filter((l) => l.section === 'investing'),
+        financingLines: lines.filter((l) => l.section === 'financing'),
+      },
+    };
+  } catch (e) {
+    return { status: 'error', message: e instanceof Error ? e.message : 'Could not build the cash-flow statement.' };
   }
 }
