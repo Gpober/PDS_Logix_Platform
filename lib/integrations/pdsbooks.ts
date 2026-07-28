@@ -28,6 +28,21 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const URL = process.env.PDS_BOOKS_SUPABASE_URL;
 const KEY = process.env.PDS_BOOKS_SUPABASE_KEY;
 const ORG_ID = process.env.PDS_BOOKS_ORG_ID; // optional single-org scope
+// The PDS Logix org id in the warehouse. Needed for the cash-flow RPC, which is
+// org-scoped; defaults to PDS Logix but can be overridden by PDS_BOOKS_ORG_ID.
+const RPC_ORG = ORG_ID ?? 'ba5ac7ab-ff03-42c8-9e63-3a5a444449ca';
+
+// Cash anchor for the cash-flow statement's absolute balance. A couple of old
+// bank accounts in the ledger are missing their pre-2020 opening balances, so a
+// raw all-time bank sum is off by a constant — the same reason the pdslogix.net
+// balance sheet uses a manual "beginning balance". Period cash MOVEMENT is exact,
+// so we anchor to one known-correct cash figure (QuickBooks' cash at this date)
+// and roll it forward with the exact ledger movement. Override via env if the
+// books are ever restated. Default: PDS's QBO cash at 2026-01-01.
+const CASH_ANCHOR_DATE = process.env.PDS_BOOKS_CASH_ANCHOR_DATE ?? '2026-01-01';
+const CASH_ANCHOR_AMOUNT = process.env.PDS_BOOKS_CASH_ANCHOR_AMOUNT != null
+  ? Number(process.env.PDS_BOOKS_CASH_ANCHOR_AMOUNT)
+  : 92885.90;
 
 export function booksConfigured(): boolean {
   return Boolean(URL && KEY);
@@ -120,6 +135,12 @@ function periodLabel(from: string, to: string): string {
     return `${mo} ${s.getUTCDate()}–${e.getUTCDate()}, ${e.getUTCFullYear()}`;
   }
   return `${fullDate(s)} – ${fullDate(e)}`;
+}
+
+function dayBefore(d: string): string {
+  const dt = new Date(`${d}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
 }
 
 // Page through a filtered select (Supabase caps a response at 1000 rows).
@@ -457,5 +478,157 @@ export async function getBooksFreshness(): Promise<BooksResult<{ asOf: string; l
     return { status: 'ok', data: { asOf: (latest as { date?: string } | null)?.date ?? '', lineCount: count ?? 0 } };
   } catch (e) {
     return { status: 'error', message: e instanceof Error ? e.message : 'Could not read the books.' };
+  }
+}
+
+// ---- Cash-flow statement (the direct / offset method — "our way") -----------
+// This is exactly how the I AM CFO and pdslogix.net cash-flow pages compute it:
+// take every journal entry that touches a Bank account, look at its OFFSETTING
+// (non-cash) lines, and read each line's cash_effect = credit − debit (a credit
+// on the offset = cash in). Group by the offset account, classify each account
+// into operating / investing / financing / transfer by its account_type. Pure
+// bank-to-bank transfers have no offset line, so they net to zero automatically.
+// We call the org's own get_cash_flow_offset_rows RPC so the math is identical
+// to the dashboards and reconciles to QuickBooks' Statement of Cash Flows.
+
+interface OffsetRow {
+  account: string | null;
+  account_type: string | null;
+  report_category: string | null;
+  cash_effect: number | null;
+  name?: string | null;
+}
+
+export type CashFlowSection = 'operating' | 'investing' | 'financing' | 'transfer';
+
+// classifyTransaction, ported from pdslogix's cash-flow page (credit cards →
+// financing, matching pdslogix — the platform variant puts them in operating).
+function classifySection(accountType: string | null, reportCategory: string | null): CashFlowSection {
+  if ((reportCategory ?? '').toLowerCase() === 'transfer') return 'transfer';
+  const at = (accountType ?? '').toLowerCase();
+  if (at.includes('accounts payable') || at.includes('a/p')) return 'operating';
+  if (at.includes('fixed asset') || at.includes('long term asset')) return 'investing';
+  if (at.includes('equity') || at.includes('long term liab') || at.includes('credit card') || at.includes('line of credit')) return 'financing';
+  return 'operating';
+}
+
+// Within operating, is this offset a cash inflow line (money in) vs outflow?
+function isOperatingInflow(accountType: string | null): boolean {
+  const at = (accountType ?? '').toLowerCase();
+  const payable = at.includes('accounts payable') || at.includes('a/p');
+  return (at.includes('income') || at.includes('current asset') || at.includes('accounts receivable') || at.includes('a/r')) && !payable;
+}
+
+export interface CashFlowLine { account: string; section: CashFlowSection; amount: number }
+export interface CashFlowStatement {
+  period: string;
+  from: string;
+  to: string;
+  operating: number;
+  investing: number;
+  financing: number;
+  transfer: number;
+  netChange: number;
+  cashAtBeginning: number | null; // null when the period predates the cash anchor
+  cashAtEnd: number | null;
+  operatingInflows: CashFlowLine[];
+  operatingOutflows: CashFlowLine[];
+  investingLines: CashFlowLine[];
+  financingLines: CashFlowLine[];
+}
+
+// Net cash movement (Σ debit − credit on cash/bank lines) over an inclusive date
+// range. Used to roll the cash anchor forward to a period's begin/end balance.
+async function sumCashMovement(fromInclusive: string, toInclusive: string): Promise<number> {
+  if (toInclusive < fromInclusive) return 0;
+  const rows = await fetchAll((lo, hi) =>
+    scoped(db().from('journal_entry_lines').select('debit,credit'))
+      .eq('is_cash_account', true)
+      .gte('date', fromInclusive)
+      .lte('date', toInclusive)
+      .range(lo, hi),
+  );
+  return rows.reduce((s, r) => s + num(r.debit) - num(r.credit), 0);
+}
+
+// A true Statement of Cash Flows for a period (direct/offset method). Defaults to
+// the current month, falling back to the most recent month with activity.
+export async function getCashFlowStatement(range?: { from?: string; to?: string }): Promise<BooksResult<CashFlowStatement>> {
+  if (!booksConfigured()) return { status: 'not_configured' };
+  try {
+    let from = range?.from, to = range?.to;
+    if (!from || !to) {
+      const r = monthRange(new Date());
+      from = from ?? r.from;
+      to = to ?? r.to;
+    }
+    const run = async (f: string, t: string): Promise<OffsetRow[]> => {
+      const { data, error } = await db().rpc('get_cash_flow_offset_rows', {
+        p_org_id: RPC_ORG, p_start_date: f, p_end_date: t, p_bank_account: null, p_properties: null,
+      });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as OffsetRow[];
+    };
+    let rows = await run(from!, to!);
+    if (rows.length === 0 && !range?.from && !range?.to) {
+      const lm = await latestMonth();
+      if (lm) { from = lm.from; to = lm.to; rows = await run(from, to); }
+    }
+
+    // Sum by account within each section (so we can show the drivers).
+    const perAccount = new Map<string, CashFlowLine>();
+    let operating = 0, investing = 0, financing = 0, transfer = 0;
+    const opInflow = new Map<string, CashFlowLine>();
+    const opOutflow = new Map<string, CashFlowLine>();
+    for (const r of rows) {
+      const amt = num(r.cash_effect);
+      const section = classifySection(r.account_type, r.report_category);
+      const account = (r.account && r.account.trim()) || r.account_type || 'Other';
+      if (section === 'operating') operating += amt;
+      else if (section === 'investing') investing += amt;
+      else if (section === 'financing') financing += amt;
+      else transfer += amt;
+
+      const bucket = section === 'operating' ? (isOperatingInflow(r.account_type) ? opInflow : opOutflow) : perAccount;
+      const key = `${section}:${account}`;
+      const existing = bucket.get(section === 'operating' ? account : key);
+      if (existing) existing.amount = round2(existing.amount + amt);
+      else bucket.set(section === 'operating' ? account : key, { account, section, amount: round2(amt) });
+    }
+
+    const sortDesc = (m: Map<string, CashFlowLine>) => [...m.values()].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const lines = sortDesc(perAccount);
+    const netChange = round2(operating + investing + financing + transfer);
+
+    // Absolute cash begin/end: roll the known cash anchor forward with the exact
+    // ledger movement. Only when the period starts on/after the anchor date.
+    let cashAtBeginning: number | null = null;
+    let cashAtEnd: number | null = null;
+    if (Number.isFinite(CASH_ANCHOR_AMOUNT) && from! >= CASH_ANCHOR_DATE) {
+      const toBeginning = await sumCashMovement(CASH_ANCHOR_DATE, dayBefore(from!));
+      cashAtBeginning = round2(CASH_ANCHOR_AMOUNT + toBeginning);
+      cashAtEnd = round2(cashAtBeginning + netChange);
+    }
+
+    return {
+      status: 'ok',
+      data: {
+        period: periodLabel(from!, to!),
+        from: from!, to: to!,
+        operating: round2(operating),
+        investing: round2(investing),
+        financing: round2(financing),
+        transfer: round2(transfer),
+        netChange,
+        cashAtBeginning,
+        cashAtEnd,
+        operatingInflows: sortDesc(opInflow),
+        operatingOutflows: sortDesc(opOutflow),
+        investingLines: lines.filter((l) => l.section === 'investing'),
+        financingLines: lines.filter((l) => l.section === 'financing'),
+      },
+    };
+  } catch (e) {
+    return { status: 'error', message: e instanceof Error ? e.message : 'Could not build the cash-flow statement.' };
   }
 }

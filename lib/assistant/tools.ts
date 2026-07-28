@@ -38,6 +38,7 @@ import {
   getArAging,
   getBooksFreshness,
   getCashFlow,
+  getCashFlowStatement,
   getCompanyFinancials,
   getCustomerFinancials,
 } from '@/lib/integrations/pdsbooks';
@@ -262,9 +263,21 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'cash_flow',
+    description:
+      "The Statement of Cash Flows for a period — where cash actually moved, computed the direct/offset method exactly like the pdslogix.net dashboards (and reconciles to QuickBooks' Statement of Cash Flows to the penny). Returns net cash change for the period split into Operating, Investing, and Financing, with the driving accounts in each (and operating broken into money-in vs money-out). Use for 'what's our cash flow', 'where did the cash go', 'how much cash did we generate/burn', or a cash-flow report. Bank-to-bank transfers net out automatically. Scope with from/to (YYYY-MM-DD); omit for the current month (falls back to the latest month with activity). NOTE: this is actual cash movement (historical); for what's still coming in/owed out use cash_calendar.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Period start YYYY-MM-DD (optional).' },
+        to: { type: 'string', description: 'Period end YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
     name: 'cash_calendar',
     description:
-      "Forward cash view from the books: money DUE IN (open receivables with real due dates, by client) and money OWED OUT (open payables, by vendor), plus the net expected. Use for cash-flow questions — what's coming in, who owes us and when, what we owe out. Optionally scope by due date with from/to (YYYY-MM-DD); omit to see all open items. For overdue-by-age use ar_aging.",
+      "Forward cash view from the books: money DUE IN (open receivables with real due dates, by client) and money OWED OUT (open payables, by vendor), plus the net expected. Use for FORWARD-looking cash questions — what's still coming in, who owes us and when, what we owe out. This is open/upcoming items, NOT cash that already moved — for the actual Statement of Cash Flows (operating/investing/financing) use cash_flow. Optionally scope by due date with from/to (YYYY-MM-DD); omit to see all open items. For overdue-by-age use ar_aging.",
     input_schema: {
       type: 'object',
       properties: {
@@ -551,6 +564,7 @@ export const TOOL_LABELS: Record<string, string> = {
   financials: 'Reading the books',
   client_financials: 'Reading client profitability',
   ar_aging: 'Aging receivables',
+  cash_flow: 'Building the cash-flow statement',
   cash_calendar: 'Reading the cash calendar',
   refresh_books: 'Checking book freshness',
   save_draft: 'Saving a draft',
@@ -674,7 +688,7 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'financials': {
       const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
       const res = await getCompanyFinancials({ from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
-      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
       return {
@@ -702,7 +716,7 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'client_financials': {
       const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
       const res = await getCustomerFinancials({ from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
-      if (res.status === 'not_configured') return NOT_CONFIGURED;
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
       return {
@@ -737,6 +751,33 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
           current: r.current, d31_60: r.d31_60, d61_90: r.d61_90, d90_plus: r.d90_plus, total: r.total,
         })),
         source: 'QuickBooks A/R aging (PDS Logix books of record)',
+      };
+    }
+
+    case 'cash_flow': {
+      const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      const res = await getCashFlowStatement({ from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
+      if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
+      if (res.status === 'error') return { error: res.message };
+      const d = res.data;
+      const top = (lines: { account: string; amount: number }[]) => lines.slice(0, 12).map((l) => ({ account: l.account, amount: l.amount }));
+      return {
+        period: d.period,
+        currency: 'USD',
+        method: 'Direct / offset method (same as the pdslogix.net cash-flow dashboard; reconciles to QuickBooks Statement of Cash Flows)',
+        operating: d.operating,
+        investing: d.investing,
+        financing: d.financing,
+        ...(d.transfer ? { transfer: d.transfer } : {}),
+        net_change_in_cash: d.netChange,
+        ...(d.cashAtBeginning != null ? { cash_at_beginning: d.cashAtBeginning, cash_at_end: d.cashAtEnd } : {}),
+        operating_detail: { money_in: top(d.operatingInflows), money_out: top(d.operatingOutflows) },
+        investing_detail: top(d.investingLines),
+        financing_detail: top(d.financingLines),
+        note: d.cashAtBeginning != null
+          ? 'Positive = cash in, negative = cash out. Bank-to-bank transfers net to zero. Cash at beginning/end is anchored to QuickBooks’ known cash balance and rolled forward with exact ledger movement.'
+          : 'Positive = cash in, negative = cash out. Bank-to-bank transfers net to zero. Absolute cash balance isn’t shown for periods before the cash anchor; the period cash movement is exact.',
+        source: 'QuickBooks (PDS Logix books of record)',
       };
     }
 
