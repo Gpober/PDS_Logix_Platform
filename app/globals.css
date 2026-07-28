@@ -96,3 +96,45 @@
     }
   }
 }
+
+/* Print / "Download PDF": isolate the report and render it as a clean ink-on-
+   white document (the app UI is dark-themed, which wastes ink and hides text on
+   paper). Charts stay vector; text stays selectable. See PrintReportButton. */
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  #report-print-area,
+  #report-print-area * { visibility: visible !important; }
+  #report-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #0a0c10 !important;
+  }
+  /* Flip the dark theme's surfaces and text for paper. */
+  #report-print-area .bg-white { background: #fff !important; }
+  #report-print-area .bg-blush { background: #eef1f3 !important; }
+  #report-print-area .text-ink,
+  #report-print-area .text-ink\/90 { color: #0a0c10 !important; }
+  #report-print-area .text-stone { color: #4b5563 !important; }
+  #report-print-area .text-tulip-dark { color: #0e97c4 !important; }
+  #report-print-area .border-line { border-color: #d7dde2 !important; }
+  /* Inline light "ink" values (KPI figures, callout text) → dark for print. */
+  #report-print-area [style*="#F2F5F8"] { color: #0a0c10 !important; }
+  /* Keep cards, charts and tables from splitting across pages. */
+  #report-print-area svg,
+  #report-print-area table,
+  #report-print-area .rounded-2xl,
+  #report-print-area .rounded-xl { break-inside: avoid; }
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  @page { margin: 16mm; }
+}
