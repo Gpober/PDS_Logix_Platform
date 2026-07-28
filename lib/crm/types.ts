@@ -23,6 +23,10 @@ export interface Client {
   logo_url: string | null;
   is_public: boolean;
   qbo_customer_id: string | null;
+  // The exact QuickBooks customer DisplayName to bill to, when it differs from
+  // the CRM display name. Invoicing sends this (falling back to `name`) so it
+  // links to the right QBO customer instead of creating a duplicate.
+  qbo_customer_name: string | null;
   created_at: string;
   updated_at: string;
 }

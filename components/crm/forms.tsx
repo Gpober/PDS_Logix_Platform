@@ -19,6 +19,12 @@ export function ClientFields({ client }: { client?: Client }) {
     <div className="grid gap-4 sm:grid-cols-2">
       <Field label="Name" name="name" defaultValue={client?.name} required />
       <Field label="Category" name="category" defaultValue={client?.category} placeholder="Dealer, fleet, insurer…" />
+      <Field
+        label="QuickBooks customer"
+        name="qbo_customer_name"
+        defaultValue={client?.qbo_customer_name}
+        placeholder="Exact QBO name (if different)"
+      />
       <Field label="Phone" name="phone" defaultValue={client?.phone} />
       <Field label="Billing email" name="billing_email" type="email" defaultValue={client?.billing_email} />
       <Field label="Website" name="website" defaultValue={client?.website} />

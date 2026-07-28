@@ -14,7 +14,7 @@ interface JobForInvoice {
   id: string;
   service_type: ServiceType;
   qbo_invoice_id: string | null;
-  clients: { id: string; name: string } | null;
+  clients: { id: string; name: string; qbo_customer_name: string | null } | null;
   assets: { year: number | null; make: string | null; model: string | null; vin: string | null } | null;
   job_pricing: { price: number | null } | null;
 }
@@ -29,7 +29,7 @@ export async function sendJobToQuickBooks(jobId: string) {
   const supabase = await createServerSupabase();
   const { data, error } = await supabase
     .from('jobs')
-    .select('id, service_type, qbo_invoice_id, clients(id, name), assets(year, make, model, vin), job_pricing(price)')
+    .select('id, service_type, qbo_invoice_id, clients(id, name, qbo_customer_name), assets(year, make, model, vin), job_pricing(price)')
     .eq('id', jobId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -44,7 +44,9 @@ export async function sendJobToQuickBooks(jobId: string) {
   const asset = job.assets ? assetLabel(job.assets) : null;
   const description = [SERVICE_LABELS[job.service_type], asset].filter(Boolean).join(' — ');
 
-  const res = await createInvoice({ customerName: job.clients.name, amount: price, description });
+  // Bill the mapped QBO customer name when set, else the CRM display name.
+  const customerName = job.clients.qbo_customer_name?.trim() || job.clients.name;
+  const res = await createInvoice({ customerName, amount: price, description });
   if (res.status === 'not_configured') {
     throw new Error('QuickBooks (via I AM CFO) isn’t configured yet — set IAMCFO_API_URL / IAMCFO_API_TOKEN.');
   }
