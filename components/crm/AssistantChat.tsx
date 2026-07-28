@@ -49,6 +49,7 @@ const TOOL_LABELS: Record<string, string> = {
   find_duplicate_invoices: 'Finding duplicate invoices',
   financials: 'Reading the books',
   client_financials: 'Reading client profitability',
+  pnl_by_account: 'Itemizing the P&L by account',
   ar_aging: 'Aging receivables',
   cash_flow: 'Building the cash-flow statement',
   cash_calendar: 'Reading the cash calendar',

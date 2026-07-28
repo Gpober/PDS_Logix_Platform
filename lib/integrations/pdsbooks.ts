@@ -68,6 +68,7 @@ const NON_POSTING = new Set(['estimate', 'sales order', 'purchase order', 'pendi
 interface RawLine {
   entry_number: string | null;
   customer: string | null;
+  account?: string | null;
   account_type: string | null;
   debit: number | null;
   credit: number | null;
@@ -170,7 +171,7 @@ async function fetchPLLines(from: string, to: string): Promise<RawLine[]> {
     scoped(
       db()
         .from('journal_entry_lines')
-        .select('entry_number,customer,account_type,debit,credit,posting,type'),
+        .select('entry_number,customer,account,account_type,debit,credit,posting,type'),
     )
       .gte('date', from)
       .lte('date', to)
@@ -331,6 +332,79 @@ export async function getCustomerFinancials(range?: { from?: string; to?: string
     }
     customers.sort((a, b) => b.revenue - a.revenue);
     return { status: 'ok', data: { period: periodLabel(from!, to!), from: from!, to: to!, customers } };
+  } catch (e) {
+    return { status: 'error', message: e instanceof Error ? e.message : 'Could not read the books.' };
+  }
+}
+
+export interface AccountAmount { account: string; amount: number }
+export interface AccountBreakdown {
+  period: string;
+  from: string;
+  to: string;
+  customer: string | null; // set when scoped to one client
+  income: AccountAmount[];
+  costOfGoodsSold: AccountAmount[];
+  expenses: AccountAmount[];
+  otherIncome: AccountAmount[];
+  otherExpense: AccountAmount[];
+  subtotals: PnL;
+}
+
+// Itemized P&L by ACCOUNT — every GL line (Condition Reports, Detail Services,
+// Photography, Contractors & Payroll, Travel:Hotel …) with its net for the
+// period, grouped Income / COGS / Expense / Other, exactly like QuickBooks' P&L
+// detail. Sub-accounts read as "Parent:Sub". Optionally scoped to one customer
+// (matches the QBO customer name, sub-customers included).
+export async function getAccountBreakdown(range?: { from?: string; to?: string }, customer?: string): Promise<BooksResult<AccountBreakdown>> {
+  if (!booksConfigured()) return { status: 'not_configured' };
+  try {
+    let from = range?.from, to = range?.to;
+    if (!from || !to) {
+      const r = monthRange(new Date());
+      from = from ?? r.from;
+      to = to ?? r.to;
+    }
+    let lines = filterPosting(await fetchPLLines(from, to));
+    if (lines.length === 0 && !range?.from && !range?.to) {
+      const lm = await latestMonth();
+      if (lm) { from = lm.from; to = lm.to; lines = filterPosting(await fetchPLLines(from, to)); }
+    }
+    const needle = customer?.trim().toLowerCase();
+    if (needle) lines = lines.filter((l) => (l.customer ?? '').toLowerCase().includes(needle));
+
+    const maps: Record<Exclude<Bucket, null>, Map<string, number>> = {
+      INCOME: new Map(), COGS: new Map(), EXPENSE: new Map(), OTHER_INCOME: new Map(), OTHER_EXPENSE: new Map(),
+    };
+    for (const l of lines) {
+      const b = bucket(l.account_type);
+      if (!b) continue;
+      const account = (l.account && l.account.trim()) || l.account_type || 'Uncategorized';
+      const d = num(l.debit), c = num(l.credit);
+      const amt = b === 'INCOME' || b === 'OTHER_INCOME' ? c - d : d - c;
+      maps[b].set(account, (maps[b].get(account) ?? 0) + amt);
+    }
+    const toList = (m: Map<string, number>): AccountAmount[] =>
+      [...m.entries()].map(([account, amount]) => ({ account, amount: round2(amount) }))
+        .filter((a) => a.amount !== 0)
+        .sort((a, b) => b.amount - a.amount);
+
+    // Subtotals fold from the same lines so they always reconcile to the detail.
+    const subtotals = foldPnL(lines);
+    return {
+      status: 'ok',
+      data: {
+        period: periodLabel(from!, to!),
+        from: from!, to: to!,
+        customer: customer?.trim() || null,
+        income: toList(maps.INCOME),
+        costOfGoodsSold: toList(maps.COGS),
+        expenses: toList(maps.EXPENSE),
+        otherIncome: toList(maps.OTHER_INCOME),
+        otherExpense: toList(maps.OTHER_EXPENSE),
+        subtotals,
+      },
+    };
   } catch (e) {
     return { status: 'error', message: e instanceof Error ? e.message : 'Could not read the books.' };
   }
