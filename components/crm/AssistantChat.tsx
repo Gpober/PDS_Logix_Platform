@@ -88,6 +88,19 @@ const STARTERS = [
 
 // ---- CSV parsing (contacts) ------------------------------------------------
 
+// Pick the delimiter from the header line — comma, tab, or semicolon (Connecteam
+// and other European-locale exports use ';'). Whichever appears most wins.
+function sniffDelim(firstLine: string, fileName: string): string {
+  if (/\.tsv$/i.test(fileName)) return '\t';
+  const counts: [string, number][] = [
+    ['\t', (firstLine.match(/\t/g) ?? []).length],
+    [';', (firstLine.match(/;/g) ?? []).length],
+    [',', (firstLine.match(/,/g) ?? []).length],
+  ];
+  counts.sort((a, b) => b[1] - a[1]);
+  return counts[0][1] > 0 ? counts[0][0] : ',';
+}
+
 const isTextLike = (file: File): boolean =>
   file.type === 'text/csv' ||
   file.type === 'text/plain' ||
@@ -134,8 +147,7 @@ function mapHeaders(header: string[]): (keyof ImportRow | null)[] {
 
 function parseContactsCsv(text: string, fileName: string): ImportRow[] | null {
   const firstLine = text.split('\n', 1)[0] ?? '';
-  const delimiter = /\.tsv$/i.test(fileName) || (firstLine.includes('\t') && !firstLine.includes(',')) ? '\t' : ',';
-  const grid = parseDelimited(text, delimiter);
+  const grid = parseDelimited(text, sniffDelim(firstLine, fileName));
   if (grid.length < 2) return null;
   const cols = mapHeaders(grid[0]);
   if (!cols.includes('company') && !cols.includes('name') && !cols.includes('email')) return null;
@@ -205,13 +217,14 @@ function mapWith<K extends string>(header: string[], defs: { key: K; re: RegExp 
 
 function parseStaffCsv(text: string, fileName: string): StaffRow[] | null {
   const first = text.split('\n', 1)[0] ?? '';
-  const delim = /\.tsv$/i.test(fileName) || (first.includes('\t') && !first.includes(',')) ? '\t' : ',';
-  const grid = parseDelimited(text, delim);
+  const grid = parseDelimited(text, sniffDelim(first, fileName));
   if (grid.length < 2) return null;
   const cols = mapWith(grid[0], STAFF_HEADERS);
   const has = (k: StaffKey) => cols.includes(k);
   const hasCompany = grid[0].some((h) => /^(client|company|dealer|fleet|insurer|account|organization|org)$/i.test(h.trim()));
-  const hasTime = cols.some((c) => c === null) && grid[0].some((h) => /(clock|shift|duration|hours|start\s*time|end\s*time)/i.test(h.trim()));
+  // Only a real time-clock sheet blocks the roster — clock in/out columns, not a
+  // "Standard Hours" employee attribute. (A time sheet is caught earlier anyway.)
+  const hasTime = grid[0].some((h) => /(clock\s*in|clock\s*out|shift\s*start|shift\s*end|time\s*in|time\s*out|check\s*in|check\s*out)/i.test(h.trim()));
   const hasName = has('name') || (has('first') && has('last')) || has('first');
   const peopleSignal = has('title') || has('active') || has('first') || has('last');
   // A team roster: names + an employee signal, and NOT a client-contacts or time sheet.
@@ -233,8 +246,7 @@ function parseStaffCsv(text: string, fileName: string): StaffRow[] | null {
 
 function parseTimeCsv(text: string, fileName: string): TimeRow[] | null {
   const first = text.split('\n', 1)[0] ?? '';
-  const delim = /\.tsv$/i.test(fileName) || (first.includes('\t') && !first.includes(',')) ? '\t' : ',';
-  const grid = parseDelimited(text, delim);
+  const grid = parseDelimited(text, sniffDelim(first, fileName));
   if (grid.length < 2) return null;
   const cols = mapWith(grid[0], TIME_HEADERS);
   const has = (k: TimeKey) => cols.includes(k);
