@@ -48,6 +48,7 @@ export async function createClient(form: FormData) {
       address: str(form, 'address'),
       notes: str(form, 'notes'),
       is_public: bool(form, 'is_public'),
+      qbo_customer_name: str(form, 'qbo_customer_name'),
     })
     .select('id')
     .single();
@@ -69,6 +70,7 @@ export async function updateClient(id: string, form: FormData) {
       address: str(form, 'address'),
       notes: str(form, 'notes'),
       is_public: bool(form, 'is_public'),
+      qbo_customer_name: str(form, 'qbo_customer_name'),
     })
     .eq('id', id);
   if (error) throw new Error(error.message);
