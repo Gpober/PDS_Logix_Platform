@@ -191,3 +191,88 @@ export function assetLabel(a: Pick<Asset, 'year' | 'make' | 'model' | 'vin'>): s
   const parts = [a.year, a.make, a.model].filter(Boolean).join(' ').trim();
   return parts || a.vin || 'Asset';
 }
+
+// ---- Assistant: drafts, memory, reports, team runs -------------------------
+// These back Zordon's write-side capabilities. Every row is owner/admin-gated
+// via RLS (see supabase/migrations/0005_assistant.sql + 0006_assistant_team.sql).
+
+export type DraftKind = 'follow_up' | 'quote' | 'reply' | 'other';
+
+// An outreach email Zordon composed. Saved, never sent — the team reads it on
+// the Drafts page and sends from their own mail.
+export interface AssistantDraft {
+  id: string;
+  kind: DraftKind;
+  subject: string;
+  body: string;
+  to_name: string | null;
+  to_email: string | null;
+  lead_id: string | null;
+  client_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export type MemoryCategory = 'business' | 'client' | 'operations' | 'preference' | 'general';
+
+// A durable fact Zordon carries across every conversation.
+export interface AssistantMemory {
+  id: string;
+  content: string;
+  category: MemoryCategory;
+  subject: string | null;
+  client_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+// ---- Visual reports --------------------------------------------------------
+// The block vocabulary Zordon composes a report from. Rendered by
+// components/crm/ReportBlocks.tsx.
+
+export type ReportTone = 'ink' | 'positive' | 'negative' | 'warning' | 'info';
+
+export interface KpiItem {
+  label: string;
+  value: string;
+  tone?: ReportTone;
+}
+
+export type ReportBlock =
+  | { type: 'text'; heading?: string; body: string }
+  | { type: 'callout'; tone?: ReportTone; text: string }
+  | { type: 'kpis'; items: KpiItem[] }
+  | { type: 'bar'; title?: string; unit?: string; series: { label: string; value: number }[] }
+  | { type: 'line'; title?: string; unit?: string; points: { label: string; value: number }[] }
+  | { type: 'table'; title?: string; columns: string[]; rows: string[][] };
+
+export interface AssistantReport {
+  id: string;
+  title: string;
+  summary: string | null;
+  blocks: ReportBlock[];
+  created_by: string | null;
+  created_at: string;
+}
+
+// ---- Team runs (the Railway worker's job queue) ----------------------------
+
+export type TeamRunStatus = 'queued' | 'running' | 'done' | 'error';
+
+export interface TeamRunResultItem {
+  target: string; // e.g. a client name or "operations"
+  specialist: string;
+  label: string;
+  report: string;
+}
+
+export interface TeamRun {
+  id: string;
+  scope: string; // free-text brief describing what the crew was asked to do
+  status: TeamRunStatus;
+  results: TeamRunResultItem[];
+  error: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getCurrentProfile } from '@/lib/crm/data';
-import { assistantConfigured, runAssistant, type AssistantMessage } from '@/lib/assistant/llm';
+import { getCurrentProfile, listAssistantMemories } from '@/lib/crm/data';
+import { assistantConfigured, runAssistant, normalizeIncomingMessages } from '@/lib/assistant/llm';
 import { buildSystemPrompt } from '@/lib/assistant/prompt';
-import { ASSISTANT_TOOLS, runAssistantTool } from '@/lib/assistant/tools';
+import { ACTION_TOOLS, ASSISTANT_TOOLS, runAssistantTool } from '@/lib/assistant/tools';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -29,26 +29,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
-  const incoming = Array.isArray(body.messages) ? body.messages : [];
-  const messages: AssistantMessage[] = incoming
-    .filter(
-      (m): m is AssistantMessage =>
-        !!m &&
-        typeof m === 'object' &&
-        'role' in m &&
-        ((m as AssistantMessage).role === 'user' || (m as AssistantMessage).role === 'assistant') &&
-        typeof (m as AssistantMessage).content === 'string',
-    )
-    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }))
-    .slice(-20);
-
+  const messages = normalizeIncomingMessages(body.messages);
   if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {
     return NextResponse.json({ error: 'Expected a user message.' }, { status: 400 });
   }
 
-  const system = buildSystemPrompt(profile);
+  const memories = await listAssistantMemories();
+  const system = buildSystemPrompt(profile, memories);
 
-  // NDJSON stream: one JSON object per line. {t:'text'|'tool'|'error', v:...}
+  // NDJSON stream: one JSON object per line.
+  //   {t:'text', v:string} | {t:'tool', v:string} |
+  //   {t:'action', v:{name,input}} | {t:'error', v:string}
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -57,8 +48,10 @@ export async function POST(req: Request) {
         for await (const event of runAssistant(system, messages, {
           tools: ASSISTANT_TOOLS,
           run: runAssistantTool,
+          actionTools: ACTION_TOOLS,
         })) {
           if (event.type === 'text') send({ t: 'text', v: event.text });
+          else if (event.type === 'action') send({ t: 'action', v: { name: event.name, input: event.input } });
           else send({ t: 'tool', v: event.name });
         }
       } catch (e) {
