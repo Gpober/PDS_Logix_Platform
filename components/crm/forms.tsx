@@ -51,6 +51,8 @@ export function StaffFields({ staff }: { staff?: Staff }) {
       <Field label="Title" name="title" defaultValue={staff?.title} placeholder="Technician, inspector…" />
       <Field label="Email" name="email" type="email" defaultValue={staff?.email} />
       <Field label="Phone" name="phone" defaultValue={staff?.phone} />
+      <Field label="Hourly rate ($/hr)" name="hourly_rate" type="number" defaultValue={staff?.hourly_rate} placeholder="e.g. 18" />
+      <Field label="Per-unit rate ($/unit)" name="unit_rate" type="number" defaultValue={staff?.unit_rate} placeholder="e.g. 4.50" />
       <div className="sm:col-span-2">
         <TextArea label="Notes" name="notes" defaultValue={staff?.notes} />
       </div>

@@ -8,6 +8,7 @@ const tabs = [
   { href: '/portal/log', label: 'Log', icon: 'M12 5v14M5 12h14' },
   { href: '/portal/performance', label: 'Stats', icon: 'M4 20V10M10 20V4M16 20v-8M22 20H2' },
   { href: '/portal/assistant', label: 'Zordon', icon: 'M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z' },
+  { href: '/portal/profile', label: 'Me', icon: 'M4 20a8 8 0 0 1 16 0M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8' },
 ];
 
 export function PortalNav() {

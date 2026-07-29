@@ -237,6 +237,10 @@ interface TimeEntryRow {
   job_id: string | null;
   clock_in: string;
   clock_out: string | null;
+  clock_in_lat: number | null;
+  clock_in_lng: number | null;
+  clock_out_lat: number | null;
+  clock_out_lng: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -257,6 +261,10 @@ function shapeEntry(row: TimeEntryRow): TimeEntryWithRelations {
     job_id: row.job_id,
     clock_in: row.clock_in,
     clock_out: row.clock_out,
+    clock_in_lat: row.clock_in_lat,
+    clock_in_lng: row.clock_in_lng,
+    clock_out_lat: row.clock_out_lat,
+    clock_out_lng: row.clock_out_lng,
     notes: row.notes,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -714,6 +722,7 @@ export interface WorkerEntry {
   vin_last6: string | null;
   model_type: string | null;
   note: string | null;
+  photo_url: string | null;
   source: string;
 }
 
@@ -723,7 +732,7 @@ export async function myRecentEntries(staffId: string, limit = 20): Promise<Work
   const supabase = await createServerSupabase();
   const { data } = await supabase
     .from('production_entries')
-    .select('id, location, service_type, submitted_at, vehicle_year, vin_last6, model_type, note, source')
+    .select('id, location, service_type, submitted_at, vehicle_year, vin_last6, model_type, note, photo_url, source')
     .eq('staff_id', staffId)
     .order('submitted_at', { ascending: false, nullsFirst: false })
     .limit(limit);
@@ -777,6 +786,72 @@ export async function workerMonthPace(staffName: string, month: string, todayIso
     projected,
     onTrack: target > 0 ? projected >= target : null,
   };
+}
+
+// ---- Pay --------------------------------------------------------------------
+// PDS pays hourly base + per-unit piece rate, summed over a pay period.
+export interface WorkerPay {
+  from: string;
+  to: string;
+  hours: number;
+  units: number;
+  hourlyRate: number;
+  unitRate: number;
+  hourlyPay: number;
+  unitPay: number;
+  total: number;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const nextDay = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + 1));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+};
+
+// One worker's pay for [from, to] (inclusive). Scoped to their own rows.
+export async function workerPay(staff: Staff, from: string, to: string): Promise<WorkerPay> {
+  const supabase = await createServerSupabase();
+  const upper = nextDay(to);
+  const [{ data: shifts }, { count }] = await Promise.all([
+    supabase.from('time_entries').select('clock_in, clock_out').eq('staff_id', staff.id).gte('clock_in', from).lt('clock_in', upper).not('clock_out', 'is', null),
+    supabase.from('production_entries').select('*', { count: 'exact', head: true }).eq('staff_id', staff.id).gte('submitted_at', from).lt('submitted_at', upper),
+  ]);
+  let ms = 0;
+  for (const r of (shifts ?? []) as { clock_in: string; clock_out: string }[]) ms += new Date(r.clock_out).getTime() - new Date(r.clock_in).getTime();
+  const hours = round2(ms / 3_600_000);
+  const units = count ?? 0;
+  const hourlyRate = staff.hourly_rate ?? 0;
+  const unitRate = staff.unit_rate ?? 0;
+  const hourlyPay = round2(hours * hourlyRate);
+  const unitPay = round2(units * unitRate);
+  return { from, to, hours, units, hourlyRate, unitRate, hourlyPay, unitPay, total: round2(hourlyPay + unitPay) };
+}
+
+export interface PayRosterRow {
+  staff_id: string;
+  name: string;
+  title: string | null;
+  is_active: boolean;
+  hourly_rate: number | null;
+  unit_rate: number | null;
+  hours: number;
+  units: number;
+  hourlyPay: number;
+  unitPay: number;
+  total: number;
+}
+
+// Every active worker's hours, units, and pay for [from, to] — the owner report.
+export async function payRoster(from: string, to: string): Promise<PayRosterRow[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.rpc('get_pay_roster', { p_from: from, p_to: to });
+  const rows = (data ?? []) as Array<Omit<PayRosterRow, 'hourlyPay' | 'unitPay' | 'total'>>;
+  return rows.map((r) => {
+    const hourlyPay = round2(r.hours * (r.hourly_rate ?? 0));
+    const unitPay = round2(r.units * (r.unit_rate ?? 0));
+    return { ...r, hourlyPay, unitPay, total: round2(hourlyPay + unitPay) };
+  });
 }
 
 export async function recentLocations(limit = 8): Promise<string[]> {

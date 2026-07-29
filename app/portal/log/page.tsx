@@ -1,6 +1,7 @@
 import { getMyStaff, myRecentEntries, recentLocations } from '@/lib/crm/data';
-import { logVehicle, deleteMyEntry } from '@/lib/crm/actions';
-import { SERVICE_LABELS, SERVICE_TYPES } from '@/lib/crm/types';
+import { deleteMyEntry } from '@/lib/crm/actions';
+import { SERVICE_LABELS } from '@/lib/crm/types';
+import { LogVehicleForm } from '@/components/portal/LogVehicleForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,82 +19,7 @@ export default async function LogPage() {
         <p className="text-sm text-stone">Tap in what you serviced — it counts toward your numbers right away.</p>
       </div>
 
-      <form action={logVehicle} className="space-y-4 rounded-2xl border border-line bg-white p-5">
-        <label className="block">
-          <span className="mb-1.5 block text-sm text-stone">Service</span>
-          <select
-            name="service_type"
-            required
-            defaultValue=""
-            className="w-full rounded-xl border border-line bg-ivory px-4 py-3 text-ink outline-none focus:border-tulip"
-          >
-            <option value="" disabled>Pick a service…</option>
-            {SERVICE_TYPES.map((s) => (
-              <option key={s} value={s}>{SERVICE_LABELS[s]}</option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-sm text-stone">Location</span>
-          <input
-            name="location"
-            list="portal-locations"
-            required
-            placeholder="e.g. Manheim Dallas"
-            className="w-full rounded-xl border border-line bg-ivory px-4 py-3 text-ink outline-none focus:border-tulip"
-          />
-          <datalist id="portal-locations">
-            {locations.map((l) => <option key={l} value={l} />)}
-          </datalist>
-        </label>
-
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="mb-1.5 block text-sm text-stone">Year</span>
-            <input
-              name="vehicle_year"
-              type="number"
-              inputMode="numeric"
-              min="1900"
-              max="2100"
-              placeholder="2022"
-              className="w-full rounded-xl border border-line bg-ivory px-4 py-3 text-ink outline-none focus:border-tulip"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm text-stone">VIN (last 6)</span>
-            <input
-              name="vin_last6"
-              maxLength={6}
-              placeholder="123456"
-              className="w-full rounded-xl border border-line bg-ivory px-4 py-3 uppercase text-ink outline-none focus:border-tulip"
-            />
-          </label>
-        </div>
-
-        <label className="block">
-          <span className="mb-1.5 block text-sm text-stone">Make / model (optional)</span>
-          <input
-            name="model_type"
-            placeholder="e.g. Toyota Camry"
-            className="w-full rounded-xl border border-line bg-ivory px-4 py-3 text-ink outline-none focus:border-tulip"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-sm text-stone">Note (optional)</span>
-          <input
-            name="note"
-            placeholder="Anything worth flagging"
-            className="w-full rounded-xl border border-line bg-ivory px-4 py-3 text-ink outline-none focus:border-tulip"
-          />
-        </label>
-
-        <button className="w-full rounded-full bg-tulip px-4 py-3 text-sm font-medium text-ivory transition-colors hover:bg-tulip-dark">
-          Log it
-        </button>
-      </form>
+      <LogVehicleForm locations={locations} />
 
       <div>
         <p className="mb-2 text-xs uppercase tracking-wider text-stone">Recent</p>
@@ -109,8 +35,16 @@ export default async function LogPage() {
                 ? new Date(e.submitted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                 : '—';
               return (
-                <li key={e.id} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-white px-4 py-3">
-                  <div className="min-w-0">
+                <li key={e.id} className="flex items-center gap-3 rounded-xl border border-line bg-white px-3 py-3">
+                  {e.photo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={e.photo_url} alt="" className="h-12 w-12 shrink-0 rounded-lg border border-line object-cover" />
+                  ) : (
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-line bg-ivory text-stone">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round" /><circle cx="12" cy="13" r="4" /></svg>
+                    </span>
+                  )}
+                  <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-ink">
                       {serviceLabel(e.service_type)} <span className="text-stone">· {e.location}</span>
                     </p>
