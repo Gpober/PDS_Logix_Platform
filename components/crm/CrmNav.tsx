@@ -11,6 +11,7 @@ const tabs = [
   { href: '/crm/staff', label: 'Team' },
   { href: '/crm/time', label: 'Time Clock' },
   { href: '/crm/pay', label: 'Pay' },
+  { href: '/crm/cashflow', label: 'Cash Flow' },
   { href: '/crm/assets', label: 'Assets' },
   { href: '/crm/jobs', label: 'Jobs' },
   { href: '/crm/production', label: 'Production' },

@@ -46,6 +46,7 @@ import {
   getFinancialsTrend,
   type Granularity,
 } from '@/lib/integrations/pdsbooks';
+import { buildCashForecast } from '@/lib/crm/forecast';
 import { runSpecialist, SPECIALIST_KEYS } from './specialists';
 import { BUILD_REPORT_INPUT_SCHEMA, normalizeReportInput } from './reportBlocks';
 
@@ -330,6 +331,12 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
         to: { type: 'string', description: 'Only items due on/before this date YYYY-MM-DD (optional).' },
       },
     },
+  },
+  {
+    name: 'cash_forecast',
+    description:
+      "FORWARD CASH FORECAST — projects the bank balance week by week starting from last Friday's end-of-day cash (live from Plaid when a bank is connected, otherwise the books' cash), then rolls in real open invoices (A/R) on their due dates and rolls out A/P plus PAYROLL on each upcoming A/B Friday payday. Payroll accrues LIVE from clock-ins and production — the current period's payday grows as the crew works ('accruing'), future paydays use the last period's run rate ('projected'). Use for 'what's our cash going to look like', 'will we make payroll Friday', 'when's our tightest week', 'cash runway', or a cash-forecast report. Returns the starting anchor, each week's money-in / money-out / payroll / net / projected ending balance, the projected low point, and the biggest drivers. Set weeks (default 8; 13 for a quarter). This is the forward projection — for actual historical cash movement use cash_flow; for the raw open-items list use cash_calendar.",
+    input_schema: { type: 'object', properties: { weeks: { type: 'number', description: 'Weeks forward (default 8, e.g. 13 for a quarter).' } } },
   },
   {
     name: 'refresh_books',
@@ -667,6 +674,7 @@ export const TOOL_LABELS: Record<string, string> = {
   ar_aging: 'Aging receivables',
   cash_flow: 'Building the cash-flow statement',
   cash_calendar: 'Reading the cash calendar',
+  cash_forecast: 'Forecasting cash',
   refresh_books: 'Checking book freshness',
   save_draft: 'Saving a draft',
   remember: 'Saving to memory',
@@ -982,6 +990,25 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
         counts: { receivables: d.dueReceivables.length, payables: d.payables.length },
         note: 'Forward view of open A/R (money due in) and A/P (money owed out) by due date. For overdue-by-age use ar_aging.',
         source: 'QuickBooks (PDS Logix books of record)',
+      };
+    }
+
+    case 'cash_forecast': {
+      const weeks = clamp(input.weeks, 8, 26);
+      const f = await buildCashForecast({ weeks });
+      const last = f.weeks[f.weeks.length - 1];
+      return {
+        anchor: { as_of_friday: f.anchor.date, balance: f.anchor.balance, source: f.anchor.source },
+        horizon_weeks: f.horizonWeeks,
+        projected_low_point: { week_ending: f.lowPoint.weekEnd, balance: f.lowPoint.balance },
+        total_in: f.totalIn,
+        total_out: f.totalOut,
+        ending_balance: last ? last.endingBalance : f.anchor.balance,
+        weeks: f.weeks.map((w) => ({ week_ending: w.weekEnd, money_in: w.inflow, money_out: w.outflow, payroll: w.payroll, net: w.net, ending_balance: w.endingBalance })),
+        payroll_paydays: f.weeks.flatMap((w) => w.items.filter((i) => i.kind === 'payroll').map((i) => ({ payday: i.date, amount: i.amount, basis: i.basis, group: i.label }))),
+        top_receivables: f.weeks.flatMap((w) => w.items.filter((i) => i.kind === 'ar')).sort((a, b) => b.amount - a.amount).slice(0, 8).map((i) => ({ customer: i.label, amount: i.amount, due: i.date })),
+        note: "Starts from last Friday's EOD cash (Plaid live when connected, locked weekly, rolling to the new Friday on Saturday). Payroll 'accruing' grows with clock-ins/production; 'projected' uses last period's run rate. A negative ending balance = a cash gap that week.",
+        source: 'PDS Logix — bank (Plaid) + QuickBooks books + live payroll',
       };
     }
 
