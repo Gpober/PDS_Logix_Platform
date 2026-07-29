@@ -410,6 +410,34 @@ export async function deleteProductionGoal(form: FormData): Promise<void> {
   revalidatePath('/crm/production');
 }
 
+// ---- Cash forecast: manual layer -------------------------------------------
+// Add an expected in/out the books don't know about yet, on a given forecast
+// week (its Friday). direction 'in' → positive, 'out' → negative.
+export async function addForecastAdjustment(form: FormData): Promise<void> {
+  const supabase = await createServerSupabase();
+  const week = str(form, 'week_ending');
+  const amount = num(form, 'amount');
+  if (!week || amount === null || amount <= 0) return;
+  const signed = str(form, 'direction') === 'out' ? -Math.abs(amount) : Math.abs(amount);
+  await supabase.from('forecast_adjustments').insert({ week_ending: week, label: str(form, 'label'), amount: signed, source: 'app' });
+  revalidatePath('/crm/cashflow');
+}
+
+export async function deleteForecastAdjustment(id: string): Promise<void> {
+  const supabase = await createServerSupabase();
+  await supabase.from('forecast_adjustments').delete().eq('id', id);
+  revalidatePath('/crm/cashflow');
+}
+
+// Override the starting cash (or clear it to fall back to the Friday snapshot).
+export async function setAnchorOverride(form: FormData): Promise<void> {
+  const supabase = await createServerSupabase();
+  const raw = str(form, 'anchor_override');
+  const value = raw === null ? null : (Number.isFinite(Number(raw)) ? Number(raw) : null);
+  await supabase.from('forecast_settings').update({ anchor_override: value, updated_at: new Date().toISOString() }).eq('id', 'singleton');
+  revalidatePath('/crm/cashflow');
+}
+
 // ---- Worker portal actions -------------------------------------------------
 async function requireMyStaff() {
   const staff = await getMyStaff();

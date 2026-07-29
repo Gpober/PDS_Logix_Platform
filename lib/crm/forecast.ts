@@ -25,7 +25,8 @@ function lastFridayBefore(iso: string): string {
 }
 
 export interface ForecastAnchor { date: string; balance: number; source: 'plaid' | 'books' | 'manual'; capturedAt?: string }
-export interface ForecastItem { label: string; amount: number; date: string | null; kind: 'ar' | 'ap' | 'payroll'; basis?: string }
+export interface ForecastItem { label: string; amount: number; date: string | null; kind: 'ar' | 'ap' | 'payroll' | 'adjust'; basis?: string }
+export interface ForecastAdjustment { id: string; week_ending: string; label: string | null; amount: number; source: string }
 export interface ForecastWeek { index: number; weekEnd: string; inflow: number; outflow: number; payroll: number; net: number; endingBalance: number; items: ForecastItem[] }
 export interface CashForecast {
   anchor: ForecastAnchor;
@@ -37,11 +38,22 @@ export interface CashForecast {
   booksConnected: boolean;
 }
 
+export async function listForecastAdjustments(): Promise<ForecastAdjustment[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.from('forecast_adjustments').select('id, week_ending, label, amount, source').order('week_ending');
+  return (data ?? []) as ForecastAdjustment[];
+}
+
 // The anchor = last Friday's EOD cash. Captured once that Friday has closed
 // (first load on/after Saturday), locked in a snapshot, and reused all week.
 export async function getForecastAnchor(): Promise<ForecastAnchor> {
   const supabase = await createServerSupabase();
   const friday = lastFridayBefore(isoToday());
+
+  // A manual anchor override wins over everything.
+  const { data: settings } = await supabase.from('forecast_settings').select('anchor_override').eq('id', 'singleton').maybeSingle();
+  const override = (settings as { anchor_override: number | null } | null)?.anchor_override;
+  if (override != null) return { date: friday, balance: Number(override), source: 'manual' };
 
   const { data: snap } = await supabase.from('cash_balance_snapshots').select('*').eq('friday_date', friday).maybeSingle();
   if (snap) {
@@ -86,6 +98,7 @@ async function periodPayroll(group: PayGroup, index: number, today: string): Pro
 
 export async function buildCashForecast(opts?: { weeks?: number }): Promise<CashForecast> {
   const weeks = Math.min(Math.max(Math.floor(opts?.weeks ?? 8), 1), 26);
+  const supabase = await createServerSupabase();
   const anchor = await getForecastAnchor();
   const today = isoToday();
   const horizonEnd = addDays(anchor.date, 7 * weeks);
@@ -131,6 +144,18 @@ export async function buildCashForecast(opts?: { weeks?: number }): Promise<Cash
         wk[b - 1].items.push({ label: `Payroll ${group} · ${est.basis}`, amount: est.amount, date: period.payDate, kind: 'payroll', basis: est.basis });
       }
     }
+  }
+
+  // Manual adjustments (expected in/out the books don't know about). Signed:
+  // positive = money in, negative = money out. Bucketed by their Friday.
+  const { data: adj } = await supabase.from('forecast_adjustments').select('id, week_ending, label, amount');
+  for (const a of (adj ?? []) as { week_ending: string; label: string | null; amount: number }[]) {
+    const b = bucketOf(a.week_ending);
+    if (!b) continue;
+    const amt = Number(a.amount);
+    if (amt >= 0) wk[b - 1].inflow += amt;
+    else wk[b - 1].outflow += Math.abs(amt);
+    wk[b - 1].items.push({ label: a.label || 'Adjustment', amount: Math.abs(amt), date: a.week_ending, kind: 'adjust', basis: amt >= 0 ? 'in' : 'out' });
   }
 
   // Roll forward from the anchor.
