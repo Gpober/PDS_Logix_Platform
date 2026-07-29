@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getCurrentProfile } from '@/lib/crm/data';
-import { buildCashForecast } from '@/lib/crm/forecast';
+import { buildCashForecast, listForecastAdjustments } from '@/lib/crm/forecast';
+import { addForecastAdjustment, deleteForecastAdjustment, setAnchorOverride } from '@/lib/crm/actions';
 import { CrmHeader, Empty } from '@/components/crm/ui';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
 
   const sp = await searchParams;
   const weeks = sp.weeks === '13' ? 13 : sp.weeks === '26' ? 26 : 8;
-  const f = await buildCashForecast({ weeks });
+  const [f, adjustments] = await Promise.all([buildCashForecast({ weeks }), listForecastAdjustments()]);
 
   const maxBal = Math.max(1, ...f.weeks.map((w) => Math.abs(w.endingBalance)), Math.abs(f.anchor.balance));
   const lowNegative = f.lowPoint.balance < 0;
@@ -135,6 +136,64 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
             </ul>
           )}
         </div>
+      </div>
+
+      {/* Manual layer — editable on the phone */}
+      <div className="rounded-2xl border border-line bg-white p-5">
+        <p className="text-xs uppercase tracking-wider text-stone">Adjustments</p>
+        <p className="mt-1 text-sm text-stone">Add money in or out the books don’t know about yet — a loan payment, a deposit, a one-off.</p>
+
+        {adjustments.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {adjustments.map((a) => (
+              <li key={a.id} className="flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-2 text-sm">
+                <span className="min-w-0 truncate text-ink">
+                  {a.label || 'Adjustment'} <span className="text-stone">· {fdate(a.week_ending)}{a.source === 'sheet' ? ' · from sheet' : ''}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-3">
+                  <span className={'tabular-nums ' + (a.amount >= 0 ? 'text-[#3E9B4F]' : 'text-[#B91C1C]')}>{a.amount >= 0 ? '+' : '−'}{usd(Math.abs(a.amount))}</span>
+                  <form action={deleteForecastAdjustment.bind(null, a.id)}>
+                    <button className="text-xs text-stone hover:text-tulip-dark">Remove</button>
+                  </form>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form action={addForecastAdjustment} className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto_auto_auto] sm:items-end">
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs text-stone">What</span>
+            <input name="label" placeholder="e.g. Loan payment" className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-ink outline-none focus:border-tulip" />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs text-stone">Week</span>
+            <select name="week_ending" required className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-ink outline-none focus:border-tulip">
+              {f.weeks.map((w) => <option key={w.weekEnd} value={w.weekEnd}>{fdate(w.weekEnd)}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs text-stone">Amount</span>
+            <input name="amount" type="number" inputMode="decimal" min="0" step="0.01" required placeholder="0" className="w-28 rounded-xl border border-line bg-ivory px-3 py-2.5 text-ink outline-none focus:border-tulip" />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs text-stone">In/Out</span>
+            <select name="direction" className="rounded-xl border border-line bg-ivory px-3 py-2.5 text-ink outline-none focus:border-tulip">
+              <option value="out">Out</option>
+              <option value="in">In</option>
+            </select>
+          </label>
+          <button className="rounded-full bg-tulip px-4 py-2.5 text-sm text-ivory hover:bg-tulip-dark">Add</button>
+        </form>
+
+        {/* Anchor override */}
+        <form action={setAnchorOverride} className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-4 text-sm">
+          <label className="block">
+            <span className="mb-1 block text-xs text-stone">Override starting cash (blank = use {f.anchor.source === 'manual' ? 'the Friday snapshot' : 'auto'})</span>
+            <input name="anchor_override" type="number" step="0.01" defaultValue={f.anchor.source === 'manual' ? f.anchor.balance : ''} placeholder="auto" className="w-40 rounded-xl border border-line bg-ivory px-3 py-2.5 text-ink outline-none focus:border-tulip" />
+          </label>
+          <button className="rounded-full border border-line px-4 py-2.5 hover:border-ink">Save anchor</button>
+        </form>
       </div>
 
       <p className="text-center text-xs text-stone">
