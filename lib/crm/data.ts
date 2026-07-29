@@ -611,3 +611,28 @@ export async function productionSummary(opts?: { location?: string; from?: strin
     by_day: d.by_day ?? [],
   };
 }
+
+// ---- Production goals -------------------------------------------------------
+export interface ProductionGoal {
+  id: string;
+  location: string | null; // null = company-wide (all locations)
+  period: string | null;   // 'YYYY-MM' or null = default monthly target
+  target_units: number;
+  note: string | null;
+  created_at: string;
+}
+
+export async function getProductionGoals(): Promise<ProductionGoal[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.from('production_goals').select('*').order('location').order('period');
+  return (data ?? []) as ProductionGoal[];
+}
+
+// The unit target for a location + month, most-specific first:
+// (loc, month) > (loc, default) > (company, month) > (company, default).
+export async function resolveMonthlyGoal(location: string | null, month: string): Promise<number> {
+  const goals = await getProductionGoals();
+  const pick = (loc: string | null, per: string | null) =>
+    goals.find((g) => (g.location ?? null) === loc && (g.period ?? null) === per)?.target_units;
+  return pick(location, month) ?? pick(location, null) ?? pick(null, month) ?? pick(null, null) ?? 0;
+}

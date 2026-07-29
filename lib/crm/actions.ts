@@ -352,3 +352,34 @@ export async function forgetMemory(form: FormData) {
   await supabase.from('assistant_memory').delete().eq('id', id);
   revalidatePath('/crm/assistant/memory');
 }
+
+// ---- Production goals -------------------------------------------------------
+// Upsert a monthly unit target. location blank = company-wide; period blank
+// (YYYY-MM) = the default that applies to every month unless a month-specific
+// goal overrides it.
+export async function setProductionGoal(form: FormData): Promise<void> {
+  const supabase = await createServerSupabase();
+  const location = str(form, 'location');
+  const period = str(form, 'period');
+  const target = num(form, 'target_units');
+  if (target === null || target < 0) return;
+  // Find an existing goal for this exact scope (null-aware), then update or insert.
+  let sel = supabase.from('production_goals').select('id');
+  sel = location === null ? sel.is('location', null) : sel.eq('location', location);
+  sel = period === null ? sel.is('period', null) : sel.eq('period', period);
+  const { data: existing } = await sel.maybeSingle();
+  const payload = { location, period, target_units: Math.trunc(target), updated_at: new Date().toISOString() };
+  if ((existing as { id: string } | null)?.id) {
+    await supabase.from('production_goals').update(payload).eq('id', (existing as { id: string }).id);
+  } else {
+    await supabase.from('production_goals').insert(payload);
+  }
+  revalidatePath('/crm/production');
+}
+
+export async function deleteProductionGoal(form: FormData): Promise<void> {
+  const supabase = await createServerSupabase();
+  const id = str(form, 'id');
+  if (id) await supabase.from('production_goals').delete().eq('id', id);
+  revalidatePath('/crm/production');
+}
