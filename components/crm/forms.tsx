@@ -1,4 +1,5 @@
 import { Field, TextArea, Select, Checkbox } from './ui';
+import { HeadshotUpload } from './HeadshotUpload';
 import {
   SERVICE_TYPES,
   JOB_STATUSES,
@@ -47,6 +48,10 @@ export function ClientFields({ client }: { client?: Client }) {
 export function StaffFields({ staff }: { staff?: Staff }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
+      <div className="sm:col-span-2">
+        <span className="mb-1.5 block text-sm text-stone">Headshot</span>
+        <HeadshotUpload defaultUrl={staff?.headshot_url} name={staff?.name ?? ''} />
+      </div>
       <Field label="Name" name="name" defaultValue={staff?.name} required />
       <Field label="Title" name="title" defaultValue={staff?.title} placeholder="Technician, inspector…" />
       <Field label="Email" name="email" type="email" defaultValue={staff?.email} />
