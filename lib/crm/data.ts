@@ -615,8 +615,9 @@ export async function productionSummary(opts?: { location?: string; from?: strin
 // ---- Production goals -------------------------------------------------------
 export interface ProductionGoal {
   id: string;
-  location: string | null; // null = company-wide (all locations)
-  period: string | null;   // 'YYYY-MM' or null = default monthly target
+  location: string | null;   // null = company-wide (all locations)
+  staff_name: string | null; // set = a personal target for one worker
+  period: string | null;     // 'YYYY-MM' or null = default monthly target
   target_units: number;
   note: string | null;
   created_at: string;
@@ -635,4 +636,153 @@ export async function resolveMonthlyGoal(location: string | null, month: string)
   const pick = (loc: string | null, per: string | null) =>
     goals.find((g) => (g.location ?? null) === loc && (g.period ?? null) === per)?.target_units;
   return pick(location, month) ?? pick(location, null) ?? pick(null, month) ?? pick(null, null) ?? 0;
+}
+
+// ---- Worker portal: identity + scoped reads --------------------------------
+// Resolve the logged-in user to their staff row by email (no FK link exists).
+export async function getMyStaff(): Promise<Staff | null> {
+  const profile = await getCurrentProfile();
+  if (!profile?.email) return null;
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from('staff')
+    .select('*')
+    .ilike('email', profile.email)
+    .maybeSingle();
+  return (data as Staff) ?? null;
+}
+
+export async function myOpenTimeEntry(staffId: string): Promise<TimeEntryWithRelations | null> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.from('time_entries').select(TIME_SELECT).eq('staff_id', staffId).is('clock_out', null).order('clock_in', { ascending: true }).limit(1).maybeSingle();
+  return data ? shapeEntry(data as TimeEntryRow) : null;
+}
+
+export async function myRecentTime(staffId: string, limit = 30): Promise<TimeEntryWithRelations[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.from('time_entries').select(TIME_SELECT).eq('staff_id', staffId).order('clock_in', { ascending: false }).limit(limit);
+  return ((data ?? []) as TimeEntryRow[]).map(shapeEntry);
+}
+
+// Sum worked milliseconds for a staff member since a date (completed shifts only).
+export async function myHoursSince(staffId: string, sinceIso: string): Promise<number> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.from('time_entries').select('clock_in, clock_out').eq('staff_id', staffId).gte('clock_in', sinceIso).not('clock_out', 'is', null);
+  let ms = 0;
+  for (const r of (data ?? []) as { clock_in: string; clock_out: string }[]) ms += new Date(r.clock_out).getTime() - new Date(r.clock_in).getTime();
+  return ms;
+}
+
+export interface WorkerProduction {
+  total_units: number;
+  date_from: string | null;
+  date_to: string | null;
+  by_service: { service_type: string; units: number }[];
+  by_location: { location: string; units: number }[];
+  by_month: { month: string; units: number }[];
+  by_day: { day: string; units: number }[];
+}
+
+export async function workerProduction(staffName: string, from?: string, to?: string): Promise<WorkerProduction> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.rpc('get_worker_production', { p_staff: staffName, p_from: from ?? null, p_to: to ?? null });
+  const d = (data ?? {}) as Partial<WorkerProduction>;
+  return {
+    total_units: d.total_units ?? 0,
+    date_from: d.date_from ?? null,
+    date_to: d.date_to ?? null,
+    by_service: d.by_service ?? [],
+    by_location: d.by_location ?? [],
+    by_month: d.by_month ?? [],
+    by_day: d.by_day ?? [],
+  };
+}
+
+// A worker's monthly unit target: (staff, month) > (staff, default).
+export async function resolveWorkerGoal(staffName: string, month: string): Promise<number> {
+  const goals = await getProductionGoals();
+  const pick = (per: string | null) => goals.find((g) => (g.staff_name ?? null) === staffName && (g.period ?? null) === per)?.target_units;
+  return pick(month) ?? pick(null) ?? 0;
+}
+
+export interface WorkerEntry {
+  id: string;
+  location: string;
+  service_type: string | null;
+  submitted_at: string | null;
+  vehicle_year: number | null;
+  vin_last6: string | null;
+  model_type: string | null;
+  note: string | null;
+  source: string;
+}
+
+// A worker's own recently-logged vehicles (native platform entries first-class,
+// but historical Connecteam rows show too). Scoped by staff_id.
+export async function myRecentEntries(staffId: string, limit = 20): Promise<WorkerEntry[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from('production_entries')
+    .select('id, location, service_type, submitted_at, vehicle_year, vin_last6, model_type, note, source')
+    .eq('staff_id', staffId)
+    .order('submitted_at', { ascending: false, nullsFirst: false })
+    .limit(limit);
+  return (data ?? []) as WorkerEntry[];
+}
+
+// A worker's pace against their monthly unit goal — the numbers the portal home
+// and performance pages show. Same shape the worker-Zordon my_goal tool returns.
+export interface WorkerPace {
+  month: string;
+  target: number;
+  done: number;
+  remaining: number;
+  daysInMonth: number;
+  daysElapsed: number;
+  daysLeft: number;
+  perDayNeeded: number;
+  paceSoFar: number;
+  projected: number;
+  onTrack: boolean | null;
+}
+
+export async function workerMonthPace(staffName: string, month: string, todayIso: string): Promise<WorkerPace> {
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const isCurrent = month === todayIso.slice(0, 7);
+  const daysElapsed = isCurrent ? Number(todayIso.slice(8, 10)) : daysInMonth;
+  const daysLeft = Math.max(0, daysInMonth - daysElapsed);
+  const start = `${month}-01`;
+  const end = isCurrent ? todayIso : `${month}-${p2(daysInMonth)}`;
+  const [target, prod] = await Promise.all([
+    resolveWorkerGoal(staffName, month),
+    workerProduction(staffName, start, end),
+  ]);
+  const done = prod.total_units;
+  const remaining = Math.max(0, target - done);
+  const perDayNeeded = daysLeft > 0 ? Math.ceil(remaining / daysLeft) : remaining;
+  const paceSoFar = daysElapsed > 0 ? done / daysElapsed : 0;
+  const projected = Math.round(paceSoFar * daysInMonth);
+  return {
+    month,
+    target,
+    done,
+    remaining,
+    daysInMonth,
+    daysElapsed,
+    daysLeft,
+    perDayNeeded,
+    paceSoFar: Math.round(paceSoFar * 10) / 10,
+    projected,
+    onTrack: target > 0 ? projected >= target : null,
+  };
+}
+
+export async function recentLocations(limit = 8): Promise<string[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.from('production_entries').select('location').limit(2000);
+  const set = new Set<string>();
+  for (const r of (data ?? []) as { location: string }[]) if (r.location) set.add(r.location);
+  return [...set].sort().slice(0, limit);
 }
