@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createServerSupabase } from '@/lib/supabase/server';
+import { getMyStaff } from './data';
 
 // Server actions for the CRM. Every mutation runs under the caller's RLS via the
 // request-scoped client, so Postgres enforces who may write what.
@@ -382,4 +383,73 @@ export async function deleteProductionGoal(form: FormData): Promise<void> {
   const id = str(form, 'id');
   if (id) await supabase.from('production_goals').delete().eq('id', id);
   revalidatePath('/crm/production');
+}
+
+// ---- Worker portal actions -------------------------------------------------
+async function requireMyStaff() {
+  const staff = await getMyStaff();
+  if (!staff) throw new Error('No worker profile is linked to your account.');
+  return staff;
+}
+
+export async function portalClockIn(): Promise<void> {
+  const staff = await requireMyStaff();
+  const supabase = await createServerSupabase();
+  const { error } = await supabase.from('time_entries').insert({ staff_id: staff.id });
+  if (error && error.code !== '23505') throw new Error(error.message); // 23505 = already clocked in
+  revalidatePath('/portal');
+}
+
+export async function portalClockOut(entryId: string): Promise<void> {
+  const supabase = await createServerSupabase();
+  await supabase.from('time_entries').update({ clock_out: new Date().toISOString() }).eq('id', entryId).is('clock_out', null);
+  revalidatePath('/portal');
+}
+
+// Log a vehicle serviced — the easy native production entry (replacing Connecteam).
+export async function logVehicle(form: FormData): Promise<void> {
+  const staff = await requireMyStaff();
+  const supabase = await createServerSupabase();
+  const service = str(form, 'service_type');
+  const location = str(form, 'location');
+  if (!service || !location) return;
+  const yearRaw = num(form, 'vehicle_year');
+  await supabase.from('production_entries').insert({
+    location,
+    staff_name: staff.name,
+    staff_id: staff.id,
+    submitted_at: new Date().toISOString(),
+    service_type: service,
+    vehicle_year: yearRaw && yearRaw > 1900 ? Math.trunc(yearRaw) : null,
+    vin_last6: str(form, 'vin_last6'),
+    model_type: str(form, 'model_type'),
+    note: str(form, 'note'),
+    source: 'platform',
+  });
+  revalidatePath('/portal/log');
+  revalidatePath('/portal');
+}
+
+export async function deleteMyEntry(entryId: string): Promise<void> {
+  const staff = await requireMyStaff();
+  const supabase = await createServerSupabase();
+  await supabase.from('production_entries').delete().eq('id', entryId).eq('staff_id', staff.id);
+  revalidatePath('/portal/log');
+}
+
+// A worker sets/updates their own monthly unit target.
+export async function setMyGoal(form: FormData): Promise<void> {
+  const staff = await requireMyStaff();
+  const supabase = await createServerSupabase();
+  const target = num(form, 'target_units');
+  const period = str(form, 'period');
+  if (target === null || target < 0) return;
+  let sel = supabase.from('production_goals').select('id').eq('staff_name', staff.name).is('location', null);
+  sel = period === null ? sel.is('period', null) : sel.eq('period', period);
+  const { data: existing } = await sel.maybeSingle();
+  const payload = { staff_name: staff.name, location: null as string | null, period, target_units: Math.trunc(target), updated_at: new Date().toISOString() };
+  if ((existing as { id: string } | null)?.id) await supabase.from('production_goals').update(payload).eq('id', (existing as { id: string }).id);
+  else await supabase.from('production_goals').insert(payload);
+  revalidatePath('/portal');
+  revalidatePath('/portal/performance');
 }

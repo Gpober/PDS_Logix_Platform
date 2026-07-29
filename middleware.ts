@@ -54,7 +54,7 @@ export function middleware(request: NextRequest) {
 
   // Fast gate for the CRM. The authoritative check is server-side in the layout;
   // this just sends an obviously-signed-out visitor straight to /login.
-  if (incoming.pathname.startsWith('/crm') && !hasSupabaseSession(request)) {
+  if ((incoming.pathname.startsWith('/crm') || incoming.pathname.startsWith('/portal')) && !hasSupabaseSession(request)) {
     const url = incoming.clone();
     url.pathname = '/login';
     url.searchParams.set('next', incoming.pathname);
