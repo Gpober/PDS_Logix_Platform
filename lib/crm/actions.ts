@@ -124,6 +124,8 @@ export async function createStaff(form: FormData) {
     title: str(form, 'title'),
     is_active: bool(form, 'is_active'),
     notes: str(form, 'notes'),
+    hourly_rate: num(form, 'hourly_rate'),
+    unit_rate: num(form, 'unit_rate'),
   });
   if (error) throw new Error(error.message);
   revalidatePath('/crm/staff');
@@ -141,6 +143,8 @@ export async function updateStaff(id: string, form: FormData) {
       title: str(form, 'title'),
       is_active: bool(form, 'is_active'),
       notes: str(form, 'notes'),
+      hourly_rate: num(form, 'hourly_rate'),
+      unit_rate: num(form, 'unit_rate'),
     })
     .eq('id', id);
   if (error) throw new Error(error.message);
@@ -392,17 +396,34 @@ async function requireMyStaff() {
   return staff;
 }
 
-export async function portalClockIn(): Promise<void> {
+// Optional GPS captured by the browser at the moment of clock in/out. Best-effort
+// — if the worker denies location or it's unavailable, coords is undefined and
+// the shift is still recorded.
+export type Coords = { lat: number; lng: number } | undefined;
+
+const validCoords = (c: Coords): c is { lat: number; lng: number } =>
+  !!c && Number.isFinite(c.lat) && Number.isFinite(c.lng) && Math.abs(c.lat) <= 90 && Math.abs(c.lng) <= 180;
+
+export async function portalClockIn(coords?: Coords): Promise<void> {
   const staff = await requireMyStaff();
   const supabase = await createServerSupabase();
-  const { error } = await supabase.from('time_entries').insert({ staff_id: staff.id });
+  const geo = validCoords(coords) ? { clock_in_lat: coords.lat, clock_in_lng: coords.lng } : {};
+  const { error } = await supabase.from('time_entries').insert({ staff_id: staff.id, ...geo });
   if (error && error.code !== '23505') throw new Error(error.message); // 23505 = already clocked in
   revalidatePath('/portal');
 }
 
-export async function portalClockOut(entryId: string): Promise<void> {
+export async function portalClockOut(entryId: string, coords?: Coords): Promise<void> {
+  const staff = await requireMyStaff();
   const supabase = await createServerSupabase();
-  await supabase.from('time_entries').update({ clock_out: new Date().toISOString() }).eq('id', entryId).is('clock_out', null);
+  const geo = validCoords(coords) ? { clock_out_lat: coords.lat, clock_out_lng: coords.lng } : {};
+  // Scope to this worker's own open entry so nobody can close someone else's.
+  await supabase
+    .from('time_entries')
+    .update({ clock_out: new Date().toISOString(), ...geo })
+    .eq('id', entryId)
+    .eq('staff_id', staff.id)
+    .is('clock_out', null);
   revalidatePath('/portal');
 }
 
@@ -414,6 +435,22 @@ export async function logVehicle(form: FormData): Promise<void> {
   const location = str(form, 'location');
   if (!service || !location) return;
   const yearRaw = num(form, 'vehicle_year');
+
+  // Optional car photo — uploaded to the public vehicle-photos bucket under the
+  // worker's id with an unguessable name. Failure to upload never blocks the log.
+  let photo_url: string | null = null;
+  const photo = form.get('photo');
+  if (photo instanceof File && photo.size > 0 && photo.type.startsWith('image/')) {
+    const ext = photo.type === 'image/png' ? 'png' : 'jpg';
+    const path = `${staff.id}/${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from('vehicle-photos')
+      .upload(path, photo, { contentType: photo.type, upsert: false });
+    if (!upErr) {
+      photo_url = supabase.storage.from('vehicle-photos').getPublicUrl(path).data.publicUrl;
+    }
+  }
+
   await supabase.from('production_entries').insert({
     location,
     staff_name: staff.name,
@@ -424,6 +461,7 @@ export async function logVehicle(form: FormData): Promise<void> {
     vin_last6: str(form, 'vin_last6'),
     model_type: str(form, 'model_type'),
     note: str(form, 'note'),
+    photo_url,
     source: 'platform',
   });
   revalidatePath('/portal/log');

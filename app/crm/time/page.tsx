@@ -7,6 +7,17 @@ import { Elapsed } from '@/components/crm/Elapsed';
 
 export const dynamic = 'force-dynamic';
 
+const mapUrl = (lat: number, lng: number) => `https://www.google.com/maps?q=${lat},${lng}`;
+
+function MapLink({ lat, lng, label }: { lat: number | null; lng: number | null; label: string }) {
+  if (lat == null || lng == null) return null;
+  return (
+    <a href={mapUrl(lat, lng)} target="_blank" rel="noreferrer" className="text-tulip hover:underline" title={`${lat.toFixed(5)}, ${lng.toFixed(5)}`}>
+      📍 {label}
+    </a>
+  );
+}
+
 // Start of the current week (Mon 00:00) for the hours summary.
 function weekStart(): number {
   const d = new Date();
@@ -78,6 +89,11 @@ export default async function TimePage() {
                 <div className="mt-1 text-lg text-tulip">
                   <Elapsed since={e.clock_in} />
                 </div>
+                {e.clock_in_lat != null && (
+                  <div className="mt-1 text-xs">
+                    <MapLink lat={e.clock_in_lat} lng={e.clock_in_lng} label="Clock-in location" />
+                  </div>
+                )}
               </div>
               <form action={clockOut.bind(null, e.id)}>
                 <button className="rounded-full border border-line px-4 py-2 text-sm hover:border-ink">
@@ -125,6 +141,7 @@ export default async function TimePage() {
               <Th>In</Th>
               <Th>Out</Th>
               <Th>Duration</Th>
+              <Th>Location</Th>
               <Th>{' '}</Th>
             </tr>
           }
@@ -137,6 +154,13 @@ export default async function TimePage() {
               <Td>{formatTime(e.clock_in)}</Td>
               <Td>{e.clock_out ? formatTime(e.clock_out) : <span className="text-tulip">Active</span>}</Td>
               <Td>{e.clock_out ? formatDurationMs(e.duration_ms) : '—'}</Td>
+              <Td>
+                <span className="flex flex-col gap-0.5 text-xs">
+                  <MapLink lat={e.clock_in_lat} lng={e.clock_in_lng} label="in" />
+                  <MapLink lat={e.clock_out_lat} lng={e.clock_out_lng} label="out" />
+                  {e.clock_in_lat == null && e.clock_out_lat == null ? <span className="text-stone">—</span> : null}
+                </span>
+              </Td>
               <Td>
                 <form action={deleteTimeEntry.bind(null, e.id)}>
                   <button className="text-xs text-stone hover:text-tulip">Delete</button>

@@ -10,6 +10,7 @@ const TOOL_LABELS: Record<string, string> = {
   my_goal: 'Checking your goal',
   my_hours: 'Adding up your hours',
   my_recent: 'Reading your recent shifts',
+  my_pay: 'Calculating your pay',
   set_goal: 'Setting your goal',
 };
 const labelFor = (name: string) => TOOL_LABELS[name] ?? name;
@@ -31,7 +32,7 @@ interface Msg {
 const STARTERS = [
   'How am I doing this month?',
   'Am I on track to hit my goal?',
-  'Break down my units by service.',
+  "What's my pay this period?",
   'How many hours have I worked this month?',
 ];
 

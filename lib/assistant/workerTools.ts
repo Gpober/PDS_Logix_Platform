@@ -3,9 +3,11 @@ import {
   myHoursSince,
   myRecentTime,
   resolveWorkerGoal,
+  workerPay,
   workerProduction,
 } from '@/lib/crm/data';
 import type { Staff } from '@/lib/crm/types';
+import { payPeriodByIndex, payPeriodContaining, payPeriodLabel } from '@/lib/crm/pay';
 import { ASSISTANT_NAME } from './config';
 
 // Worker Zordon — a small, personal cut of the assistant for the field team.
@@ -64,6 +66,15 @@ export const WORKER_TOOLS: Anthropic.Tool[] = [
       properties: { limit: { type: 'number', description: 'How many to return (default 10, max 30).' } },
     },
   },
+  {
+    name: 'my_pay',
+    description:
+      "The worker's estimated pay for a bi-weekly pay period: hours and hourly pay, units and per-unit pay, and the total. Use for 'what's my pay this period', 'how much have I made', or 'what am I on track to earn'. Pass period_offset to look back (0 = current period, -1 = last period, etc.); omit for the current period. If their rate isn't set, say pay can't be computed and to ask their manager.",
+    input_schema: {
+      type: 'object',
+      properties: { period_offset: { type: 'number', description: 'Periods back from now (0 = current, -1 = previous).' } },
+    },
+  },
   // ---- gated proposal (confirmed by the worker) ----------------------------
   {
     name: 'set_goal',
@@ -87,6 +98,7 @@ export const WORKER_TOOL_LABELS: Record<string, string> = {
   my_goal: 'Checking your goal',
   my_hours: 'Adding up your hours',
   my_recent: 'Reading your recent shifts',
+  my_pay: 'Calculating your pay',
   set_goal: 'Setting your goal',
 };
 
@@ -171,6 +183,31 @@ export function makeWorkerRunner(staff: Staff): (name: string, input: unknown) =
         };
       }
 
+      case 'my_pay': {
+        const offset = Number.isFinite(Number(input.period_offset)) ? Math.trunc(Number(input.period_offset)) : 0;
+        const current = payPeriodContaining(isoDay(new Date()));
+        const period = payPeriodByIndex(current.index + Math.min(0, offset));
+        const pay = await workerPay(staff, period.start, period.end);
+        const hasRate = (staff.hourly_rate ?? 0) > 0 || (staff.unit_rate ?? 0) > 0;
+        return {
+          worker: staff.name,
+          pay_period: payPeriodLabel(period),
+          from: period.start,
+          to: period.end,
+          is_current: period.index === current.index,
+          hours: pay.hours,
+          hourly_rate: staff.hourly_rate,
+          hourly_pay: pay.hourlyPay,
+          units: pay.units,
+          unit_rate: staff.unit_rate,
+          unit_pay: pay.unitPay,
+          total_pay: pay.total,
+          note: hasRate
+            ? 'Estimate = hours × hourly rate + units × per-unit rate over the bi-weekly period. The actual paycheck is final.'
+            : 'No pay rate is set for this worker — pay can’t be computed. Tell them to ask their manager to set it.',
+        };
+      }
+
       case 'set_goal':
         return { error: 'This must be confirmed by the worker; it cannot run directly.' };
 
@@ -208,13 +245,20 @@ export function buildWorkerSystemPrompt(staff: Staff): string {
     `  per-day rate to finish, and a projection of where they'll land.`,
     `- my_hours — their clocked hours (completed shifts) since a date.`,
     `- my_recent — their recent clock-in/out shifts.`,
+    `- my_pay — their estimated pay for a bi-weekly period (hourly base + per-unit).`,
     `USE THEM. Never answer a numbers question from memory — look it up. Every`,
     `figure you give must come from a tool result this turn. If a tool returns`,
     `nothing, say so plainly.`,
     ``,
-    `You can ONLY see this worker's own data — not teammates', not the company`,
-    `books or dollars. If they ask about someone else or about money/finances, tell`,
-    `them that's not something you can see here and point them to their manager.`,
+    `You can ONLY see this worker's own data — not teammates'. If they ask about`,
+    `someone else, tell them that's not something you can see here.`,
+    ``,
+    `## Pay`,
+    `You can tell them their OWN estimated pay with my_pay: PDS pays an hourly base`,
+    `plus a per-unit piece rate, summed over a bi-weekly pay period. Always call it`,
+    `an estimate and note the paycheck is final. If their rate isn't set, say pay`,
+    `can't be computed yet and to ask their manager. Never discuss anyone else's pay`,
+    `or the company's finances — only this worker's.`,
     ``,
     `## Goals`,
     `When they ask how they're doing, pull my_goal and tell them plainly whether`,

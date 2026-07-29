@@ -50,6 +50,8 @@ export interface Staff {
   title: string | null;
   is_active: boolean;
   notes: string | null;
+  hourly_rate: number | null; // $/hour base
+  unit_rate: number | null;   // $/unit piece rate (added on top)
   created_at: string;
   updated_at: string;
 }
@@ -179,6 +181,10 @@ export interface TimeEntry {
   job_id: string | null;
   clock_in: string;
   clock_out: string | null;
+  clock_in_lat: number | null;
+  clock_in_lng: number | null;
+  clock_out_lat: number | null;
+  clock_out_lng: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;

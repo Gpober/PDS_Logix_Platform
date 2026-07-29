@@ -15,10 +15,26 @@ function fmt(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(sec)}`;
 }
 
+// Best-effort GPS. Resolves undefined if unavailable or the worker declines, so
+// clocking never blocks on location.
+function getCoords(): Promise<{ lat: number; lng: number } | undefined> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(undefined);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(undefined),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 },
+    );
+  });
+}
+
 export function ClockWidget({ openSince, entryId }: { openSince: string | null; entryId: string | null }) {
   const [pending, start] = useTransition();
   const [now, setNow] = useState(() => Date.now());
   const open = Boolean(openSince && entryId);
+
+  const clockIn = () => start(async () => portalClockIn(await getCoords()));
+  const clockOut = () => start(async () => portalClockOut(entryId as string, await getCoords()));
 
   useEffect(() => {
     if (!open) return;
@@ -42,24 +58,26 @@ export function ClockWidget({ openSince, entryId }: { openSince: string | null; 
             {new Date(openSince as string).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
           </p>
           <button
-            onClick={() => start(() => portalClockOut(entryId as string))}
+            onClick={clockOut}
             disabled={pending}
             className="mt-4 w-full rounded-full bg-tulip px-4 py-3 text-sm font-medium text-ivory transition-colors hover:bg-tulip-dark disabled:opacity-50"
           >
             {pending ? 'Clocking out…' : 'Clock out'}
           </button>
+          <p className="mt-2 text-center text-[11px] text-stone">We record your location when you clock in and out.</p>
         </>
       ) : (
         <>
           <p className="mt-2 font-display text-2xl text-ink">You’re clocked out</p>
           <p className="mt-1 text-sm text-stone">Tap below to start your shift.</p>
           <button
-            onClick={() => start(() => portalClockIn())}
+            onClick={clockIn}
             disabled={pending}
             className="mt-4 w-full rounded-full bg-tulip px-4 py-3 text-sm font-medium text-ivory transition-colors hover:bg-tulip-dark disabled:opacity-50"
           >
             {pending ? 'Clocking in…' : 'Clock in'}
           </button>
+          <p className="mt-2 text-center text-[11px] text-stone">We record your location when you clock in and out.</p>
         </>
       )}
     </div>
