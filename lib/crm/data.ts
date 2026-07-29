@@ -112,6 +112,49 @@ export async function getStaff(id: string): Promise<Staff | null> {
   return (data as Staff) ?? null;
 }
 
+// Distinct positions for the roster filter. Titles can be compound
+// ("Admin, Location Manager") — split on comma so the filter lists clean roles.
+export async function staffPositions(): Promise<string[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase.from('staff').select('title');
+  const set = new Set<string>();
+  for (const r of (data ?? []) as { title: string | null }[]) {
+    if (!r.title) continue;
+    for (const part of r.title.split(',')) {
+      const t = part.trim();
+      if (t) set.add(t);
+    }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+export type StaffSort = 'name' | 'title' | 'group';
+
+// Filtered/sorted roster for the talent-style Staff page.
+export async function listStaffBrowse(opts: {
+  search?: string;
+  position?: string;
+  group?: string;
+  activeOnly?: boolean;
+  sortBy?: StaffSort;
+  sortOrder?: 'asc' | 'desc';
+}): Promise<Staff[]> {
+  const supabase = await createServerSupabase();
+  const asc = opts.sortOrder !== 'desc';
+  const col = opts.sortBy === 'title' ? 'title' : opts.sortBy === 'group' ? 'payroll_group' : 'name';
+  let q = supabase.from('staff').select('*');
+  if (opts.search?.trim()) {
+    const s = `%${opts.search.trim()}%`;
+    q = q.or(`name.ilike.${s},email.ilike.${s},title.ilike.${s}`);
+  }
+  if (opts.position?.trim()) q = q.ilike('title', `%${opts.position.trim()}%`);
+  if (opts.group === 'A' || opts.group === 'B') q = q.eq('payroll_group', opts.group);
+  if (opts.activeOnly) q = q.eq('is_active', true);
+  q = q.order(col, { ascending: asc, nullsFirst: false }).order('name', { ascending: true });
+  const { data } = await q;
+  return (data as Staff[]) ?? [];
+}
+
 export async function staffOptions(): Promise<{ id: string; name: string }[]> {
   const supabase = await createServerSupabase();
   const { data } = await supabase

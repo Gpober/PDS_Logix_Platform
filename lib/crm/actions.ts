@@ -115,6 +115,21 @@ export async function deleteContact(id: string, clientId?: string) {
 
 // ---- Staff -----------------------------------------------------------------
 
+// Upload a headshot to the public staff-photos bucket and return its URL. Called
+// from the staff form's client uploader, which stores the URL in a hidden field.
+export async function uploadStaffHeadshot(form: FormData): Promise<string> {
+  const file = form.get('file');
+  if (!(file instanceof File) || file.size === 0 || !file.type.startsWith('image/')) {
+    throw new Error('Pick an image.');
+  }
+  const supabase = await createServerSupabase();
+  const ext = file.type === 'image/png' ? 'png' : 'jpg';
+  const path = `${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from('staff-photos').upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw new Error(error.message);
+  return supabase.storage.from('staff-photos').getPublicUrl(path).data.publicUrl;
+}
+
 export async function createStaff(form: FormData) {
   const supabase = await createServerSupabase();
   const { error } = await supabase.from('staff').insert({
@@ -128,6 +143,7 @@ export async function createStaff(form: FormData) {
     unit_rate: num(form, 'unit_rate'),
     salary_per_check: num(form, 'salary_per_check'),
     payroll_group: str(form, 'payroll_group') === 'B' ? 'B' : 'A',
+    headshot_url: str(form, 'headshot_url'),
   });
   if (error) throw new Error(error.message);
   revalidatePath('/crm/staff');
@@ -149,6 +165,7 @@ export async function updateStaff(id: string, form: FormData) {
       unit_rate: num(form, 'unit_rate'),
       salary_per_check: num(form, 'salary_per_check'),
       payroll_group: str(form, 'payroll_group') === 'B' ? 'B' : 'A',
+      headshot_url: str(form, 'headshot_url'),
     })
     .eq('id', id);
   if (error) throw new Error(error.message);

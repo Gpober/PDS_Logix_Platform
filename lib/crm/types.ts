@@ -54,6 +54,7 @@ export interface Staff {
   unit_rate: number | null;        // $/unit piece rate (added on top)
   salary_per_check: number | null; // flat amount paid each pay period (on top)
   payroll_group: 'A' | 'B';        // which bi-weekly pay group they're on
+  headshot_url: string | null;     // team-card photo
   created_at: string;
   updated_at: string;
 }
