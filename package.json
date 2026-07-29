@@ -14,8 +14,10 @@
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "next": "^15.1.6",
+    "plaid": "^42.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-plaid-link": "^4.2.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
