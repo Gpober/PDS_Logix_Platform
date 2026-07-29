@@ -62,7 +62,7 @@ export default async function ProductionPage() {
           <h3 className="mt-1 font-display text-lg">Set a monthly target</h3>
           <p className="mt-1 text-sm text-stone">A target for a location (or all) and month. Leave the month blank to set the default that applies every month.</p>
           <form action={setProductionGoal} className="mt-3 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block text-sm">
                 <span className="mb-1 block text-xs text-stone">Location</span>
                 <select name="location" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-sm text-ink outline-none focus:border-tulip">
