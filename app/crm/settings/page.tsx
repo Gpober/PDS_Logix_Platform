@@ -1,6 +1,7 @@
 import { getCurrentProfile } from '@/lib/crm/data';
 import { iamcfoConfigured, iamcfoConnected } from '@/lib/integrations/iamcfo';
 import { CrmHeader, Empty } from '@/components/crm/ui';
+import { BankConnections } from '@/components/crm/BankConnections';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,8 +13,19 @@ export default async function SettingsPage() {
   const connected = configured && (await iamcfoConnected());
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-3xl space-y-6">
       <CrmHeader title="Settings" />
+
+      {/* Bank connections (Plaid) — powers live cash + the forecast */}
+      <section className="rounded-2xl border border-line bg-white p-6">
+        <div className="mb-4">
+          <h2 className="font-display text-xl">Bank connections</h2>
+          <p className="mt-1 text-sm text-stone">
+            Link your bank through Plaid for live cash on hand — the starting point for cash forecasting.
+          </p>
+        </div>
+        {isOwner ? <BankConnections /> : <Empty>Only an owner or admin can manage bank connections.</Empty>}
+      </section>
 
       <section className="rounded-2xl border border-line bg-white p-6">
         <div className="flex items-center justify-between gap-4">
