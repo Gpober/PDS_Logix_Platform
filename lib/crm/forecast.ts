@@ -24,7 +24,7 @@ function lastFridayBefore(iso: string): string {
   return addDays(iso, -delta);
 }
 
-export interface ForecastAnchor { date: string; balance: number; source: 'plaid' | 'books' | 'manual'; capturedAt?: string }
+export interface ForecastAnchor { date: string; balance: number; source: 'plaid' | 'books' | 'manual'; capturedAt?: string; needsEntry?: boolean }
 export interface ForecastItem { label: string; amount: number; date: string | null; kind: 'ar' | 'ap' | 'payroll' | 'adjust'; basis?: string }
 export interface ForecastAdjustment { id: string; week_ending: string; label: string | null; amount: number; source: string }
 export interface ForecastWeek { index: number; weekEnd: string; inflow: number; outflow: number; payroll: number; net: number; endingBalance: number; items: ForecastItem[] }
@@ -50,35 +50,28 @@ export async function getForecastAnchor(): Promise<ForecastAnchor> {
   const supabase = await createServerSupabase();
   const friday = lastFridayBefore(isoToday());
 
-  // A manual anchor override wins over everything.
-  const { data: settings } = await supabase.from('forecast_settings').select('anchor_override').eq('id', 'singleton').maybeSingle();
-  const override = (settings as { anchor_override: number | null } | null)?.anchor_override;
-  if (override != null) return { date: friday, balance: Number(override), source: 'manual' };
-
+  // A snapshot for THIS Friday wins — a manually typed balance or a prior
+  // live capture. It's tied to the specific Friday, so it locks for the week
+  // and a new Friday (Saturday) starts fresh.
   const { data: snap } = await supabase.from('cash_balance_snapshots').select('*').eq('friday_date', friday).maybeSingle();
   if (snap) {
     const s = snap as { balance: number; source: ForecastAnchor['source']; captured_at: string };
     return { date: friday, balance: Number(s.balance), source: s.source, capturedAt: s.captured_at };
   }
 
-  // No snapshot yet for this Friday — capture the current balance and lock it.
-  let balance = 0;
-  let source: ForecastAnchor['source'] = 'books';
+  // No snapshot yet — try live sources, and only lock one when we actually have
+  // a number. Otherwise leave it blank and prompt for a manual Friday balance.
   const plaid = await getPlaidCashTotal();
   if (plaid.connected) {
-    balance = plaid.total;
-    source = 'plaid';
-  } else {
-    const fin = await getCompanyFinancials();
-    if (fin.status === 'ok') balance = fin.data.cashBalance;
-    source = 'books';
+    await supabase.from('cash_balance_snapshots').upsert({ friday_date: friday, balance: plaid.total, source: 'plaid', captured_at: new Date().toISOString() }, { onConflict: 'friday_date' });
+    return { date: friday, balance: plaid.total, source: 'plaid' };
   }
-  // Best-effort lock (owner/admin only per RLS; harmless if it doesn't persist).
-  await supabase.from('cash_balance_snapshots').upsert(
-    { friday_date: friday, balance, source, captured_at: new Date().toISOString() },
-    { onConflict: 'friday_date' },
-  );
-  return { date: friday, balance, source };
+  const fin = await getCompanyFinancials();
+  if (fin.status === 'ok') {
+    await supabase.from('cash_balance_snapshots').upsert({ friday_date: friday, balance: fin.data.cashBalance, source: 'books', captured_at: new Date().toISOString() }, { onConflict: 'friday_date' });
+    return { date: friday, balance: fin.data.cashBalance, source: 'books' };
+  }
+  return { date: friday, balance: 0, source: 'books', needsEntry: true };
 }
 
 // Payroll for a group's period: actual once the period has ended, otherwise an

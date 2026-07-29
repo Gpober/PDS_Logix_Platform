@@ -52,7 +52,7 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
           <p className="text-xs uppercase tracking-wider text-stone">Cash on hand · Fri {fdate(f.anchor.date)}</p>
           <p className="font-display text-3xl tabular-nums text-ink">{usd2(f.anchor.balance)}</p>
           <p className="text-[11px] text-stone">
-            {f.anchor.source === 'books' && !f.booksConnected ? 'No live balance — connect a bank on Settings' : `from ${sourceLabel}`}
+            {f.anchor.needsEntry ? 'Type last Friday’s balance below to start' : f.anchor.source === 'manual' ? 'entered manually' : `from ${sourceLabel}`}
           </p>
         </div>
         <div className="flex items-center gap-2 text-sm">
@@ -65,6 +65,17 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
           ))}
         </div>
       </div>
+
+      {/* Type last Friday's end-of-day bank balance — locks for the week, resets Saturday */}
+      <form action={setAnchorOverride} className={'flex flex-wrap items-end gap-3 rounded-2xl border p-4 text-sm ' + (f.anchor.needsEntry ? 'border-tulip/50 bg-blush/30' : 'border-line bg-white')}>
+        <label className="block min-w-[200px] flex-1">
+          <span className="mb-1 block text-xs text-stone">Last Friday’s ending bank balance (Fri {fdate(f.anchor.date)})</span>
+          <input name="anchor_override" type="number" inputMode="decimal" step="0.01" defaultValue={f.anchor.source === 'manual' ? f.anchor.balance : ''} placeholder="e.g. 92885.90"
+            className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-ink outline-none focus:border-tulip" />
+        </label>
+        <button className="rounded-full bg-tulip px-5 py-2.5 text-ivory hover:bg-tulip-dark">Save Friday balance</button>
+        <p className="w-full text-[11px] text-stone">Locks for the week and resets to a fresh entry next Saturday. Save blank to clear and use the live/auto balance.</p>
+      </form>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -194,15 +205,6 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
             </select>
           </label>
           <button className="rounded-full bg-tulip px-4 py-2.5 text-sm text-ivory hover:bg-tulip-dark">Add</button>
-        </form>
-
-        {/* Anchor override */}
-        <form action={setAnchorOverride} className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-4 text-sm">
-          <label className="block">
-            <span className="mb-1 block text-xs text-stone">Override starting cash (blank = use {f.anchor.source === 'manual' ? 'the Friday snapshot' : 'auto'})</span>
-            <input name="anchor_override" type="number" step="0.01" defaultValue={f.anchor.source === 'manual' ? f.anchor.balance : ''} placeholder="auto" className="w-40 rounded-xl border border-line bg-ivory px-3 py-2.5 text-ink outline-none focus:border-tulip" />
-          </label>
-          <button className="rounded-full border border-line px-4 py-2.5 hover:border-ink">Save anchor</button>
         </form>
       </div>
 
