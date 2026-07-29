@@ -587,6 +587,85 @@ export async function getArAging(): Promise<BooksResult<{ rows: AgingRow[]; tota
   }
 }
 
+export interface ApAgingRow {
+  vendor: string;
+  current: number;
+  d31_60: number;
+  d61_90: number;
+  d90_plus: number;
+  total: number;
+}
+
+// A/P aging by vendor, bucketed by days past the due date — the payables view.
+export async function getApAging(): Promise<BooksResult<{ rows: ApAgingRow[]; totals: Omit<ApAgingRow, 'vendor'>; asOf: string }>> {
+  if (!booksConfigured()) return { status: 'not_configured' };
+  try {
+    const data = await fetchAll((lo, hi) =>
+      scoped(db().from('ap_aging').select('vendor,due_date,open_balance')).gt('open_balance', 0).range(lo, hi),
+    ) as unknown as { vendor: string | null; due_date: string | null; open_balance: number }[];
+
+    const now = Date.now();
+    const map = new Map<string, ApAgingRow>();
+    for (const r of data) {
+      const key = (r.vendor ?? 'Unknown').trim() || 'Unknown';
+      const row = map.get(key) ?? { vendor: key, current: 0, d31_60: 0, d61_90: 0, d90_plus: 0, total: 0 };
+      const bal = num(r.open_balance);
+      const days = r.due_date ? Math.floor((now - new Date(r.due_date).getTime()) / 86_400_000) : 0;
+      if (days <= 30) row.current += bal;
+      else if (days <= 60) row.d31_60 += bal;
+      else if (days <= 90) row.d61_90 += bal;
+      else row.d90_plus += bal;
+      row.total += bal;
+      map.set(key, row);
+    }
+    const rows = [...map.values()]
+      .map((r) => ({ vendor: r.vendor, current: round2(r.current), d31_60: round2(r.d31_60), d61_90: round2(r.d61_90), d90_plus: round2(r.d90_plus), total: round2(r.total) }))
+      .sort((a, b) => b.total - a.total);
+    const totals = rows.reduce(
+      (s, r) => ({ current: round2(s.current + r.current), d31_60: round2(s.d31_60 + r.d31_60), d61_90: round2(s.d61_90 + r.d61_90), d90_plus: round2(s.d90_plus + r.d90_plus), total: round2(s.total + r.total) }),
+      { current: 0, d31_60: 0, d61_90: 0, d90_plus: 0, total: 0 },
+    );
+    return { status: 'ok', data: { rows, totals, asOf: '' } };
+  } catch (e) {
+    return { status: 'error', message: e instanceof Error ? e.message : 'Could not read payables.' };
+  }
+}
+
+export interface BalanceSheetLine { account: string; amount: number }
+export interface BalanceSheet {
+  asOf: string;
+  assets: BalanceSheetLine[];
+  liabilities: BalanceSheetLine[];
+  equity: BalanceSheetLine[];
+  netIncome: number;
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number; // includes current-period net income
+}
+
+// Balance sheet as of a date (default today), via the warehouse RPC. Current
+// earnings (net income) fold into total equity, so Assets = Liabilities + Equity.
+export async function getBalanceSheet(asOf?: string): Promise<BooksResult<BalanceSheet>> {
+  if (!booksConfigured()) return { status: 'not_configured' };
+  try {
+    const now = new Date();
+    const date = asOf ?? `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
+    const { data, error } = await db().rpc('get_balance_sheet', { p_org_id: RPC_ORG, p_asof: date });
+    if (error) throw new Error(error.message);
+    const d = (data ?? {}) as { assets?: BalanceSheetLine[]; liabilities?: BalanceSheetLine[]; equity?: BalanceSheetLine[]; net_income?: number };
+    const assets = (d.assets ?? []).map((l) => ({ account: l.account, amount: num(l.amount) }));
+    const liabilities = (d.liabilities ?? []).map((l) => ({ account: l.account, amount: num(l.amount) }));
+    const equity = (d.equity ?? []).map((l) => ({ account: l.account, amount: num(l.amount) }));
+    const netIncome = num(d.net_income);
+    const totalAssets = round2(assets.reduce((s, l) => s + l.amount, 0));
+    const totalLiabilities = round2(liabilities.reduce((s, l) => s + l.amount, 0));
+    const totalEquity = round2(equity.reduce((s, l) => s + l.amount, 0) + netIncome);
+    return { status: 'ok', data: { asOf: date, assets, liabilities, equity, netIncome, totalAssets, totalLiabilities, totalEquity } };
+  } catch (e) {
+    return { status: 'error', message: e instanceof Error ? e.message : 'Could not read the balance sheet.' };
+  }
+}
+
 export interface CashFlow {
   from: string;
   to: string;
