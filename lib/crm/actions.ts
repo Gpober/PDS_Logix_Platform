@@ -429,12 +429,33 @@ export async function deleteForecastAdjustment(id: string): Promise<void> {
   revalidatePath('/crm/cashflow');
 }
 
-// Override the starting cash (or clear it to fall back to the Friday snapshot).
+// The most recent Friday strictly before today (matches the forecast anchor).
+function anchorFridayToday(): string {
+  const n = new Date();
+  const ms = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate());
+  const dow = new Date(ms).getUTCDay(); // Fri = 5
+  const delta = ((dow - 5 + 7) % 7) || 7;
+  const f = new Date(ms - delta * 86_400_000);
+  return `${f.getUTCFullYear()}-${String(f.getUTCMonth() + 1).padStart(2, '0')}-${String(f.getUTCDate()).padStart(2, '0')}`;
+}
+
+// Type in last Friday's end-of-day balance. Stored against THAT Friday so it
+// locks for the week; a new Friday (Saturday) prompts for the next one. Blank
+// clears the manual entry and reverts to the live/auto source.
 export async function setAnchorOverride(form: FormData): Promise<void> {
   const supabase = await createServerSupabase();
+  const friday = anchorFridayToday();
   const raw = str(form, 'anchor_override');
-  const value = raw === null ? null : (Number.isFinite(Number(raw)) ? Number(raw) : null);
-  await supabase.from('forecast_settings').update({ anchor_override: value, updated_at: new Date().toISOString() }).eq('id', 'singleton');
+  if (raw === null) {
+    await supabase.from('cash_balance_snapshots').delete().eq('friday_date', friday).eq('source', 'manual');
+  } else {
+    const value = Number(raw.replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(value)) return;
+    await supabase.from('cash_balance_snapshots').upsert(
+      { friday_date: friday, balance: value, source: 'manual', captured_at: new Date().toISOString() },
+      { onConflict: 'friday_date' },
+    );
+  }
   revalidatePath('/crm/cashflow');
 }
 
