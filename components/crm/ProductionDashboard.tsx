@@ -165,6 +165,126 @@ function GoalCard({ goal, today, onSet }: { goal: Goal | null; today: Date; onSe
   );
 }
 
+// Scrolling ranking ticker (like the Tulips leaderboard bar).
+function Ticker({ rows }: { rows: Named[] }) {
+  if (!rows.length) return null;
+  const total = rows.reduce((s, r) => s + r.units, 0) || 1;
+  const items = rows.slice(0, 20).map((r, i) => (
+    <span key={i} className="mx-4 inline-flex items-center gap-2 text-xs">
+      <span className="font-semibold text-stone">#{i + 1}</span>
+      <span className="text-ink">{String(r.staff ?? r.service_type ?? r.location ?? '—')}</span>
+      <span className="tabular-nums text-tulip">{nf(r.units)}</span>
+      <span className="text-stone">· {Math.round((r.units / total) * 100)}%</span>
+    </span>
+  ));
+  return (
+    <div className="overflow-hidden rounded-full border border-line bg-white py-2">
+      <div className="flex w-max animate-marquee whitespace-nowrap">
+        <div className="flex">{items}</div>
+        <div className="flex" aria-hidden>{items}</div>
+      </div>
+    </div>
+  );
+}
+
+// Row × month matrix (person / service / location) with totals — the grid view.
+function Matrix({ location, year, onCell }: { location: string; year: string; onCell: (dim: string, key: string, month: string) => void }) {
+  const [dim, setDim] = useState<'staff' | 'service' | 'location'>('staff');
+  const [cells, setCells] = useState<{ key: string; month: string; units: number }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      setLoading(true);
+      const p = new URLSearchParams({ dimension: dim, from: `${year}-01-01`, to: `${year}-12-31` });
+      if (location) p.set('location', location);
+      try {
+        const res = await fetch(`/api/production/matrix?${p}`);
+        const data = await res.json();
+        if (!cancel) setCells(data.cells ?? []);
+      } finally { if (!cancel) setLoading(false); }
+    })();
+    return () => { cancel = true; };
+  }, [dim, year, location]);
+
+  const months = useMemo(() => Array.from({ length: 12 }, (_, i) => `${year}-${pad(i + 1)}`), [year]);
+  const monthLabels = useMemo(() => months.map((m) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }).toUpperCase()), [months]);
+
+  const { rows, colTotals, grand } = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    const cT = new Map<string, number>();
+    let g = 0;
+    for (const c of cells) {
+      if (!map.has(c.key)) map.set(c.key, new Map());
+      map.get(c.key)!.set(c.month, (map.get(c.key)!.get(c.month) ?? 0) + c.units);
+      cT.set(c.month, (cT.get(c.month) ?? 0) + c.units);
+      g += c.units;
+    }
+    const rows = [...map.entries()]
+      .map(([key, m]) => ({ key, cells: m, total: [...m.values()].reduce((s, v) => s + v, 0) }))
+      .sort((a, b) => b.total - a.total);
+    return { rows, colTotals: cT, grand: g };
+  }, [cells]);
+
+  const cell = (v: number | undefined) => (v ? nf(v) : '—');
+  const dimLabel = dim === 'staff' ? 'Person' : dim === 'service' ? 'Service' : 'Location';
+
+  return (
+    <div className="rounded-2xl border border-line bg-white p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="eyebrow">Matrix</p>
+          <h3 className="mt-1 font-display text-lg">Units by {dimLabel.toLowerCase()} × month</h3>
+        </div>
+        <Segmented value={dim} onChange={setDim} options={[{ v: 'staff', label: 'Person' }, { v: 'service', label: 'Service' }, { v: 'location', label: 'Location' }]} />
+      </div>
+      {loading && rows.length === 0 ? (
+        <p className="text-sm text-stone">Loading…</p>
+      ) : (
+        <div className="-mx-5 overflow-x-auto px-5">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead>
+              <tr className="border-b border-line text-[11px] uppercase tracking-wider text-stone">
+                <th className="sticky left-0 z-10 bg-white px-2 py-2 text-left font-medium">{dimLabel}</th>
+                {monthLabels.map((m) => <th key={m} className="px-2 py-2 text-right font-medium">{m}</th>)}
+                <th className="px-2 py-2 text-right font-semibold text-ink">TOTAL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className="border-b border-line/60 hover:bg-blush/30">
+                  <td className="sticky left-0 z-10 max-w-[180px] truncate bg-white px-2 py-2 text-left text-ink">{r.key}</td>
+                  {months.map((m) => {
+                    const v = r.cells.get(m);
+                    return (
+                      <td key={m} className={'px-2 py-2 text-right tabular-nums ' + (v ? 'cursor-pointer text-stone hover:text-tulip' : 'text-line')}
+                        onClick={() => v && onCell(dim, r.key, m)}>
+                        {cell(v)}
+                      </td>
+                    );
+                  })}
+                  <td className="px-2 py-2 text-right font-semibold tabular-nums text-ink">{nf(r.total)}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={14} className="px-2 py-4 text-center text-sm text-stone">No data.</td></tr>}
+            </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr className="border-t border-line text-sm">
+                  <td className="sticky left-0 z-10 bg-white px-2 py-2 text-left font-semibold text-ink">Total</td>
+                  {months.map((m) => <td key={m} className="px-2 py-2 text-right font-medium tabular-nums text-stone">{cell(colTotals.get(m))}</td>)}
+                  <td className="px-2 py-2 text-right font-bold tabular-nums text-tulip">{nf(grand)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProductionDashboard({
   initialSummary, initialGoal, locations, todayIso,
 }: { initialSummary: Summary; initialGoal: Goal | null; locations: string[]; todayIso: string }) {
@@ -184,6 +304,16 @@ export function ProductionDashboard({
   const [q, setQ] = useState('');
 
   const range = useMemo(() => presetRange(preset, today), [preset, today]);
+  const year = (range.from ?? todayIso).slice(0, 4);
+
+  // Clicking a matrix cell drills the detail table to that row + month.
+  const onMatrixCell = useCallback((dim: string, key: string, month: string) => {
+    setDrillMonth(month);
+    if (dim === 'staff') setDrillStaff(key);
+    else if (dim === 'service') setDrillService(key);
+    else if (dim === 'location') setLocation(key);
+    setTimeout(() => document.getElementById('prod-detail')?.scrollIntoView({ behavior: 'smooth' }), 60);
+  }, [todayIso]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -262,8 +392,12 @@ export function ProductionDashboard({
         <RankBars title="Top producers" rows={summary.by_staff ?? []} keyName="staff" tone={TONE.good} active={drillStaff} onPick={(v) => setDrillStaff((c) => (c === v ? null : v))} limit={15} />
       </div>
 
+      <Ticker rows={summary.by_staff ?? []} />
+
+      <Matrix location={location} year={year} onCell={onMatrixCell} />
+
       {/* Detail (drill-down) */}
-      <div className="rounded-2xl border border-line bg-white p-5">
+      <div id="prod-detail" className="rounded-2xl border border-line bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="eyebrow">Detail</p>
