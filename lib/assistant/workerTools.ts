@@ -7,7 +7,7 @@ import {
   workerProduction,
 } from '@/lib/crm/data';
 import type { Staff } from '@/lib/crm/types';
-import { payPeriodByIndex, payPeriodContaining, payPeriodLabel } from '@/lib/crm/pay';
+import { asGroup, payDateLabel, payPeriodByIndex, payPeriodContaining, payPeriodLabel } from '@/lib/crm/pay';
 import { ASSISTANT_NAME } from './config';
 
 // Worker Zordon — a small, personal cut of the assistant for the field team.
@@ -185,13 +185,16 @@ export function makeWorkerRunner(staff: Staff): (name: string, input: unknown) =
 
       case 'my_pay': {
         const offset = Number.isFinite(Number(input.period_offset)) ? Math.trunc(Number(input.period_offset)) : 0;
-        const current = payPeriodContaining(isoDay(new Date()));
-        const period = payPeriodByIndex(current.index + Math.min(0, offset));
+        const group = asGroup(staff.payroll_group);
+        const current = payPeriodContaining(isoDay(new Date()), group);
+        const period = payPeriodByIndex(current.index + Math.min(0, offset), group);
         const pay = await workerPay(staff, period.start, period.end);
         const hasRate = (staff.hourly_rate ?? 0) > 0 || (staff.unit_rate ?? 0) > 0;
         return {
           worker: staff.name,
+          pay_group: group,
           pay_period: payPeriodLabel(period),
+          pay_date: payDateLabel(period),
           from: period.start,
           to: period.end,
           is_current: period.index === current.index,

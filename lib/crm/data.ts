@@ -833,6 +833,8 @@ export interface PayRosterRow {
   name: string;
   title: string | null;
   is_active: boolean;
+  payroll_group: 'A' | 'B';
+  email: string | null;
   hourly_rate: number | null;
   unit_rate: number | null;
   hours: number;
@@ -843,10 +845,12 @@ export interface PayRosterRow {
 }
 
 // Every active worker's hours, units, and pay for [from, to] — the owner report.
-export async function payRoster(from: string, to: string): Promise<PayRosterRow[]> {
+// Optionally scope to one pay group (A/B), since each group's period differs.
+export async function payRoster(from: string, to: string, group?: 'A' | 'B'): Promise<PayRosterRow[]> {
   const supabase = await createServerSupabase();
   const { data } = await supabase.rpc('get_pay_roster', { p_from: from, p_to: to });
-  const rows = (data ?? []) as Array<Omit<PayRosterRow, 'hourlyPay' | 'unitPay' | 'total'>>;
+  let rows = (data ?? []) as Array<Omit<PayRosterRow, 'hourlyPay' | 'unitPay' | 'total'>>;
+  if (group) rows = rows.filter((r) => (r.payroll_group ?? 'A') === group);
   return rows.map((r) => {
     const hourlyPay = round2(r.hours * (r.hourly_rate ?? 0));
     const unitPay = round2(r.units * (r.unit_rate ?? 0));

@@ -50,8 +50,9 @@ export interface Staff {
   title: string | null;
   is_active: boolean;
   notes: string | null;
-  hourly_rate: number | null; // $/hour base
-  unit_rate: number | null;   // $/unit piece rate (added on top)
+  hourly_rate: number | null;      // $/hour base
+  unit_rate: number | null;        // $/unit piece rate (added on top)
+  payroll_group: 'A' | 'B';        // which bi-weekly pay group they're on
   created_at: string;
   updated_at: string;
 }

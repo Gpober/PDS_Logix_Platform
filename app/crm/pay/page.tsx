@@ -1,14 +1,15 @@
 import Link from 'next/link';
 import { getCurrentProfile, payRoster } from '@/lib/crm/data';
-import { payPeriodByIndex, payPeriodContaining, payPeriodLabel } from '@/lib/crm/pay';
+import { asGroup, payDateLabel, payPeriodByIndex, payPeriodContaining, payPeriodLabel, type PayGroup } from '@/lib/crm/pay';
 import { CrmHeader, Table, Th, Td, Empty } from '@/components/crm/ui';
+import { PayExportButton } from '@/components/crm/PayExportButton';
 
 export const dynamic = 'force-dynamic';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const usd = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 
-export default async function PayPage({ searchParams }: { searchParams: Promise<{ p?: string }> }) {
+export default async function PayPage({ searchParams }: { searchParams: Promise<{ p?: string; g?: string }> }) {
   const profile = await getCurrentProfile();
   const isOwner = profile?.role === 'owner' || profile?.role === 'admin';
   if (!isOwner) {
@@ -21,48 +22,69 @@ export default async function PayPage({ searchParams }: { searchParams: Promise<
   }
 
   const sp = await searchParams;
+  const group: PayGroup = asGroup(sp.g);
   const now = new Date();
   const todayIso = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
-  const current = payPeriodContaining(todayIso);
+  const current = payPeriodContaining(todayIso, group);
   const idx = sp.p != null && /^-?\d+$/.test(sp.p) ? Number(sp.p) : current.index;
-  const period = payPeriodByIndex(idx);
+  const period = payPeriodByIndex(idx, group);
   const isCurrent = idx === current.index;
 
-  const rows = await payRoster(period.start, period.end);
+  const rows = await payRoster(period.start, period.end, group);
   const active = rows.filter((r) => r.hours > 0 || r.units > 0 || r.total > 0);
   const totals = active.reduce(
     (a, r) => ({ hours: a.hours + r.hours, units: a.units + r.units, hourlyPay: a.hourlyPay + r.hourlyPay, unitPay: a.unitPay + r.unitPay, total: a.total + r.total }),
     { hours: 0, units: 0, hourlyPay: 0, unitPay: 0, total: 0 },
   );
 
+  const groupTab = (g: PayGroup) => (
+    <Link
+      href={`/crm/pay?g=${g}`}
+      className={'rounded-full px-4 py-1.5 text-sm font-medium transition-colors ' + (group === g ? 'bg-tulip text-ivory' : 'bg-white text-stone hover:text-ink border border-line')}
+    >
+      Group {g}
+    </Link>
+  );
+
   return (
     <div className="mx-auto max-w-5xl">
       <CrmHeader title="Pay" />
 
-      {/* Period selector */}
-      <div className="mb-5 flex items-center justify-center gap-2">
-        <Link href={`/crm/pay?p=${idx - 1}`} className="rounded-full border border-line px-3 py-1.5 text-sm text-stone hover:border-ink">‹ Prev</Link>
+      {/* Group tabs */}
+      <div className="mb-4 flex items-center justify-center gap-2">
+        {groupTab('A')}
+        {groupTab('B')}
+      </div>
+
+      {/* Period selector + pay date */}
+      <div className="mb-2 flex items-center justify-center gap-2">
+        <Link href={`/crm/pay?g=${group}&p=${idx - 1}`} className="rounded-full border border-line px-3 py-1.5 text-sm text-stone hover:border-ink">‹ Prev</Link>
         <div className="min-w-[16rem] rounded-full border border-line bg-white px-4 py-1.5 text-center text-sm">
           <span className="text-ink">{payPeriodLabel(period)}</span>
           {isCurrent && <span className="ml-2 text-xs text-tulip">current</span>}
         </div>
         <Link
-          href={`/crm/pay?p=${idx + 1}`}
+          href={`/crm/pay?g=${group}&p=${idx + 1}`}
           aria-disabled={isCurrent}
           className={'rounded-full border border-line px-3 py-1.5 text-sm ' + (isCurrent ? 'pointer-events-none opacity-30' : 'text-stone hover:border-ink')}
         >Next ›</Link>
       </div>
+      <p className="mb-5 text-center text-xs text-stone">Thursday–Wednesday · paid {payDateLabel(period)}</p>
 
       {/* Headline totals */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Kpi label="Total pay" value={usd(totals.total)} />
         <Kpi label="Hours" value={String(Math.round(totals.hours * 10) / 10)} />
         <Kpi label="Units" value={totals.units.toLocaleString('en-US')} />
         <Kpi label="People paid" value={String(active.length)} />
       </div>
 
+      <div className="mb-4 flex justify-end">
+        <PayExportButton rows={active} periodStart={period.start} periodEnd={period.end} payDate={period.payDate} group={group} />
+      </div>
+
       {active.length === 0 ? (
-        <Empty>No hours or units logged in this pay period yet.</Empty>
+        <Empty>No hours or units logged for Group {group} in this pay period yet.</Empty>
       ) : (
         <Table
           head={
@@ -103,7 +125,7 @@ export default async function PayPage({ searchParams }: { searchParams: Promise<
       )}
 
       <p className="mt-4 text-center text-xs text-stone">
-        Hourly base (from the time clock) plus per-unit piece rate (from the production log), over the bi-weekly pay period. Set each worker’s rates on their Staff page.
+        Hourly base (from the time clock) plus per-unit piece rate (from the production log), for pay Group {group}. Set each worker’s rates and group on their Staff page. Export the CSV to run it through Gusto.
       </p>
     </div>
   );

@@ -53,6 +53,12 @@ export function StaffFields({ staff }: { staff?: Staff }) {
       <Field label="Phone" name="phone" defaultValue={staff?.phone} />
       <Field label="Hourly rate ($/hr)" name="hourly_rate" type="number" defaultValue={staff?.hourly_rate} placeholder="e.g. 18" />
       <Field label="Per-unit rate ($/unit)" name="unit_rate" type="number" defaultValue={staff?.unit_rate} placeholder="e.g. 4.50" />
+      <Select
+        label="Pay group (bi-weekly A/B)"
+        name="payroll_group"
+        defaultValue={staff?.payroll_group ?? 'A'}
+        options={[{ value: 'A', label: 'Group A' }, { value: 'B', label: 'Group B' }]}
+      />
       <div className="sm:col-span-2">
         <TextArea label="Notes" name="notes" defaultValue={staff?.notes} />
       </div>

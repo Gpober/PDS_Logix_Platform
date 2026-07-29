@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMyStaff, workerPay } from '@/lib/crm/data';
-import { payPeriodByIndex, payPeriodContaining, payPeriodLabel } from '@/lib/crm/pay';
+import { asGroup, payDateLabel, payPeriodByIndex, payPeriodContaining, payPeriodLabel } from '@/lib/crm/pay';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,11 +11,12 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
   const staff = (await getMyStaff())!;
   const sp = await searchParams;
 
+  const group = asGroup(staff.payroll_group);
   const now = new Date();
   const todayIso = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
-  const current = payPeriodContaining(todayIso);
+  const current = payPeriodContaining(todayIso, group);
   const idx = sp.p != null && /^-?\d+$/.test(sp.p) ? Number(sp.p) : current.index;
-  const period = payPeriodByIndex(idx);
+  const period = payPeriodByIndex(idx, group);
   const pay = await workerPay(staff, period.start, period.end);
 
   const hasRates = (staff.hourly_rate ?? 0) > 0 || (staff.unit_rate ?? 0) > 0;
@@ -36,6 +37,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
           <Row label="Phone" value={staff.phone ?? '—'} />
           <Row label="Hourly rate" value={staff.hourly_rate != null ? `${usd(staff.hourly_rate)}/hr` : 'Not set'} />
           <Row label="Per-unit rate" value={staff.unit_rate != null ? `${usd(staff.unit_rate)}/unit` : 'Not set'} />
+          <Row label="Pay group" value={`Group ${group} · bi-weekly`} />
         </dl>
         {!hasRates && (
           <p className="mt-3 rounded-xl bg-ivory p-3 text-xs text-stone">
@@ -59,6 +61,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
           </div>
         </div>
         <p className="mt-1 text-sm text-ink">{payPeriodLabel(period)}</p>
+        <p className="text-xs text-stone">Paid {payDateLabel(period)}</p>
 
         <div className="mt-4 flex items-baseline gap-2">
           <span className="font-display text-4xl tabular-nums text-ink">{usd(pay.total)}</span>
