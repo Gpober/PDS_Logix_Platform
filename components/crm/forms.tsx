@@ -53,6 +53,7 @@ export function StaffFields({ staff }: { staff?: Staff }) {
       <Field label="Phone" name="phone" defaultValue={staff?.phone} />
       <Field label="Hourly rate ($/hr)" name="hourly_rate" type="number" defaultValue={staff?.hourly_rate} placeholder="e.g. 18" />
       <Field label="Per-unit rate ($/unit)" name="unit_rate" type="number" defaultValue={staff?.unit_rate} placeholder="e.g. 4.50" />
+      <Field label="Salary per check ($)" name="salary_per_check" type="number" defaultValue={staff?.salary_per_check} placeholder="flat amount each paycheck" />
       <Select
         label="Pay group (bi-weekly A/B)"
         name="payroll_group"

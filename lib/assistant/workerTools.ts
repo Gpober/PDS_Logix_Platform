@@ -189,7 +189,7 @@ export function makeWorkerRunner(staff: Staff): (name: string, input: unknown) =
         const current = payPeriodContaining(isoDay(new Date()), group);
         const period = payPeriodByIndex(current.index + Math.min(0, offset), group);
         const pay = await workerPay(staff, period.start, period.end);
-        const hasRate = (staff.hourly_rate ?? 0) > 0 || (staff.unit_rate ?? 0) > 0;
+        const hasRate = (staff.hourly_rate ?? 0) > 0 || (staff.unit_rate ?? 0) > 0 || (staff.salary_per_check ?? 0) > 0;
         return {
           worker: staff.name,
           pay_group: group,
@@ -204,6 +204,8 @@ export function makeWorkerRunner(staff: Staff): (name: string, input: unknown) =
           units: pay.units,
           unit_rate: staff.unit_rate,
           unit_pay: pay.unitPay,
+          salary_per_check: staff.salary_per_check,
+          salary_pay: pay.salaryPay,
           total_pay: pay.total,
           note: hasRate
             ? 'Estimate = hours × hourly rate + units × per-unit rate over the bi-weekly period. The actual paycheck is final.'

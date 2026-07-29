@@ -62,6 +62,7 @@ export default async function PayDetailPage({ params, searchParams }: {
         <div className="mt-3 space-y-1.5 border-t border-line pt-3 text-sm">
           <Row label={`${pay.hours} paid hrs${staff.hourly_rate != null ? ` × ${usd(pay.hourlyRate)}` : ' · no hourly rate'}`} value={usd(pay.hourlyPay)} />
           <Row label={`${pay.units.toLocaleString('en-US')} units${staff.unit_rate != null ? ` × ${usd(pay.unitRate)}` : ' · no unit rate'}`} value={usd(pay.unitPay)} />
+          {pay.salaryPay > 0 && <Row label="Salary (per check)" value={usd(pay.salaryPay)} />}
         </div>
       </div>
 

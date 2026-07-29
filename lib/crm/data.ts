@@ -814,6 +814,7 @@ export interface WorkerPay {
   unitRate: number;
   hourlyPay: number;
   unitPay: number;
+  salaryPay: number; // flat per-check salary applied to this period
   total: number;
 }
 
@@ -840,7 +841,8 @@ export async function workerPay(staff: Staff, from: string, to: string): Promise
   const unitRate = staff.unit_rate ?? 0;
   const hourlyPay = round2(hours * hourlyRate);
   const unitPay = round2(units * unitRate);
-  return { from, to, hours, units, hourlyRate, unitRate, hourlyPay, unitPay, total: round2(hourlyPay + unitPay) };
+  const salaryPay = staff.salary_per_check ?? 0;
+  return { from, to, hours, units, hourlyRate, unitRate, hourlyPay, unitPay, salaryPay, total: round2(hourlyPay + unitPay + salaryPay) };
 }
 
 // The shifts and units behind a worker's pay for a period — the drill-down.
@@ -894,10 +896,12 @@ export interface PayRosterRow {
   email: string | null;
   hourly_rate: number | null;
   unit_rate: number | null;
+  salary_per_check: number | null;
   hours: number;
   units: number;
   hourlyPay: number;
   unitPay: number;
+  salaryPay: number;
   total: number;
 }
 
@@ -906,12 +910,13 @@ export interface PayRosterRow {
 export async function payRoster(from: string, to: string, group?: 'A' | 'B'): Promise<PayRosterRow[]> {
   const supabase = await createServerSupabase();
   const { data } = await supabase.rpc('get_pay_roster', { p_from: from, p_to: to });
-  let rows = (data ?? []) as Array<Omit<PayRosterRow, 'hourlyPay' | 'unitPay' | 'total'>>;
+  let rows = (data ?? []) as Array<Omit<PayRosterRow, 'hourlyPay' | 'unitPay' | 'salaryPay' | 'total'>>;
   if (group) rows = rows.filter((r) => (r.payroll_group ?? 'A') === group);
   return rows.map((r) => {
     const hourlyPay = round2(r.hours * (r.hourly_rate ?? 0));
     const unitPay = round2(r.units * (r.unit_rate ?? 0));
-    return { ...r, hourlyPay, unitPay, total: round2(hourlyPay + unitPay) };
+    const salaryPay = r.salary_per_check ?? 0;
+    return { ...r, hourlyPay, unitPay, salaryPay, total: round2(hourlyPay + unitPay + salaryPay) };
   });
 }
 
