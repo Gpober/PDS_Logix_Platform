@@ -126,6 +126,7 @@ export async function createStaff(form: FormData) {
     notes: str(form, 'notes'),
     hourly_rate: num(form, 'hourly_rate'),
     unit_rate: num(form, 'unit_rate'),
+    payroll_group: str(form, 'payroll_group') === 'B' ? 'B' : 'A',
   });
   if (error) throw new Error(error.message);
   revalidatePath('/crm/staff');
@@ -145,6 +146,7 @@ export async function updateStaff(id: string, form: FormData) {
       notes: str(form, 'notes'),
       hourly_rate: num(form, 'hourly_rate'),
       unit_rate: num(form, 'unit_rate'),
+      payroll_group: str(form, 'payroll_group') === 'B' ? 'B' : 'A',
     })
     .eq('id', id);
   if (error) throw new Error(error.message);
