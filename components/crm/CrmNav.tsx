@@ -27,7 +27,8 @@ const groups = [
     { href: '/crm/time', label: 'Time Clock' },
     { href: '/crm/pay', label: 'Pay' },
   ] },
-  { key: 'money', label: 'Money', items: [
+  { key: 'financials', label: 'Financials', items: [
+    { href: '/crm/financials', label: 'Reports' },
     { href: '/crm/cashflow', label: 'Cash Flow' },
     { href: '/crm/settings', label: 'Settings' },
   ] },
