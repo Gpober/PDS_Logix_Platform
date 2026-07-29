@@ -29,7 +29,7 @@ const groups = [
   ] },
   { key: 'financials', label: 'Financials', items: [
     { href: '/crm/financials', label: 'Reports' },
-    { href: '/crm/cashflow', label: 'Cash Flow' },
+    { href: '/crm/cashflow', label: 'Cash Forecast' },
     { href: '/crm/settings', label: 'Settings' },
   ] },
 ];
