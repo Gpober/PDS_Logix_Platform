@@ -672,12 +672,27 @@ export async function myRecentTime(staffId: string, limit = 30): Promise<TimeEnt
   return ((data ?? []) as TimeEntryRow[]).map(shapeEntry);
 }
 
-// Sum worked milliseconds for a staff member since a date (completed shifts only).
+// Unpaid meal break: 1 hour is deducted from any single shift of 8+ hours.
+// Applied per shift, everywhere hours feed pay, so the portal, the owner report,
+// and the RPC all agree.
+export const BREAK_MIN_SHIFT_HOURS = 8;
+export const BREAK_DEDUCT_HOURS = 1;
+const MS_HOUR = 3_600_000;
+
+// Paid milliseconds for one shift, after the meal-break deduction.
+export function paidShiftMs(clockIn: string, clockOut: string): number {
+  const raw = new Date(clockOut).getTime() - new Date(clockIn).getTime();
+  if (raw <= 0) return 0;
+  return raw >= BREAK_MIN_SHIFT_HOURS * MS_HOUR ? Math.max(0, raw - BREAK_DEDUCT_HOURS * MS_HOUR) : raw;
+}
+
+// Sum PAID milliseconds for a staff member since a date (completed shifts only,
+// meal break deducted).
 export async function myHoursSince(staffId: string, sinceIso: string): Promise<number> {
   const supabase = await createServerSupabase();
   const { data } = await supabase.from('time_entries').select('clock_in, clock_out').eq('staff_id', staffId).gte('clock_in', sinceIso).not('clock_out', 'is', null);
   let ms = 0;
-  for (const r of (data ?? []) as { clock_in: string; clock_out: string }[]) ms += new Date(r.clock_out).getTime() - new Date(r.clock_in).getTime();
+  for (const r of (data ?? []) as { clock_in: string; clock_out: string }[]) ms += paidShiftMs(r.clock_in, r.clock_out);
   return ms;
 }
 
@@ -818,7 +833,7 @@ export async function workerPay(staff: Staff, from: string, to: string): Promise
     supabase.from('production_entries').select('*', { count: 'exact', head: true }).eq('staff_id', staff.id).gte('submitted_at', from).lt('submitted_at', upper),
   ]);
   let ms = 0;
-  for (const r of (shifts ?? []) as { clock_in: string; clock_out: string }[]) ms += new Date(r.clock_out).getTime() - new Date(r.clock_in).getTime();
+  for (const r of (shifts ?? []) as { clock_in: string; clock_out: string }[]) ms += paidShiftMs(r.clock_in, r.clock_out);
   const hours = round2(ms / 3_600_000);
   const units = count ?? 0;
   const hourlyRate = staff.hourly_rate ?? 0;
@@ -826,6 +841,48 @@ export async function workerPay(staff: Staff, from: string, to: string): Promise
   const hourlyPay = round2(hours * hourlyRate);
   const unitPay = round2(units * unitRate);
   return { from, to, hours, units, hourlyRate, unitRate, hourlyPay, unitPay, total: round2(hourlyPay + unitPay) };
+}
+
+// The shifts and units behind a worker's pay for a period — the drill-down.
+export interface PayShiftRow {
+  clock_in: string;
+  clock_out: string;
+  rawHours: number;
+  breakHours: number;
+  paidHours: number;
+  clock_in_lat: number | null;
+  clock_in_lng: number | null;
+  clock_out_lat: number | null;
+  clock_out_lng: number | null;
+}
+export interface PayDetail {
+  shifts: PayShiftRow[];
+  entries: WorkerEntry[];
+  paidHours: number;
+  units: number;
+}
+
+export async function payDetail(staffId: string, from: string, to: string): Promise<PayDetail> {
+  const supabase = await createServerSupabase();
+  const upper = nextDay(to);
+  const [{ data: te }, { data: pe }] = await Promise.all([
+    supabase.from('time_entries')
+      .select('clock_in, clock_out, clock_in_lat, clock_in_lng, clock_out_lat, clock_out_lng')
+      .eq('staff_id', staffId).gte('clock_in', from).lt('clock_in', upper).not('clock_out', 'is', null)
+      .order('clock_in', { ascending: true }),
+    supabase.from('production_entries')
+      .select('id, location, service_type, submitted_at, vehicle_year, vin_last6, model_type, note, photo_url, source')
+      .eq('staff_id', staffId).gte('submitted_at', from).lt('submitted_at', upper)
+      .order('submitted_at', { ascending: true }),
+  ]);
+  const shifts: PayShiftRow[] = ((te ?? []) as Array<{ clock_in: string; clock_out: string; clock_in_lat: number | null; clock_in_lng: number | null; clock_out_lat: number | null; clock_out_lng: number | null }>).map((r) => {
+    const rawHours = Math.round(((new Date(r.clock_out).getTime() - new Date(r.clock_in).getTime()) / MS_HOUR) * 100) / 100;
+    const paidHours = Math.round((paidShiftMs(r.clock_in, r.clock_out) / MS_HOUR) * 100) / 100;
+    return { clock_in: r.clock_in, clock_out: r.clock_out, rawHours, breakHours: Math.round((rawHours - paidHours) * 100) / 100, paidHours, clock_in_lat: r.clock_in_lat, clock_in_lng: r.clock_in_lng, clock_out_lat: r.clock_out_lat, clock_out_lng: r.clock_out_lng };
+  });
+  const entries = (pe ?? []) as WorkerEntry[];
+  const paidHours = round2(shifts.reduce((a, s) => a + s.paidHours, 0));
+  return { shifts, entries, paidHours, units: entries.length };
 }
 
 export interface PayRosterRow {
