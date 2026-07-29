@@ -13,6 +13,7 @@ export interface PayExportRow {
   unit_rate: number | null;
   hourlyPay: number;
   unitPay: number;
+  salaryPay: number;
   total: number;
 }
 
@@ -32,7 +33,7 @@ export function PayExportButton({ rows, periodStart, periodEnd, payDate, group }
     const headers = [
       'First Name', 'Last Name', 'Email', 'Pay Group',
       'Regular Hours', 'Units', 'Hourly Rate', 'Unit Rate',
-      'Hourly Pay', 'Unit Pay', 'Gross Pay',
+      'Hourly Pay', 'Unit Pay', 'Salary', 'Gross Pay',
       'Period Start', 'Period End', 'Pay Date',
     ];
     const body = rows.map((r) => {
@@ -41,7 +42,7 @@ export function PayExportButton({ rows, periodStart, periodEnd, payDate, group }
       return [
         first, last, r.email ?? '', r.payroll_group,
         r.hours, r.units, r.hourly_rate ?? '', r.unit_rate ?? '',
-        r.hourlyPay.toFixed(2), r.unitPay.toFixed(2), r.total.toFixed(2),
+        r.hourlyPay.toFixed(2), r.unitPay.toFixed(2), r.salaryPay.toFixed(2), r.total.toFixed(2),
         periodStart, periodEnd, payDate,
       ].map(csvCell).join(',');
     });

@@ -33,9 +33,10 @@ export default async function PayPage({ searchParams }: { searchParams: Promise<
   const rows = await payRoster(period.start, period.end, group);
   const active = rows.filter((r) => r.hours > 0 || r.units > 0 || r.total > 0);
   const totals = active.reduce(
-    (a, r) => ({ hours: a.hours + r.hours, units: a.units + r.units, hourlyPay: a.hourlyPay + r.hourlyPay, unitPay: a.unitPay + r.unitPay, total: a.total + r.total }),
-    { hours: 0, units: 0, hourlyPay: 0, unitPay: 0, total: 0 },
+    (a, r) => ({ hours: a.hours + r.hours, units: a.units + r.units, hourlyPay: a.hourlyPay + r.hourlyPay, unitPay: a.unitPay + r.unitPay, salaryPay: a.salaryPay + r.salaryPay, total: a.total + r.total }),
+    { hours: 0, units: 0, hourlyPay: 0, unitPay: 0, salaryPay: 0, total: 0 },
   );
+  const anySalary = active.some((r) => r.salaryPay > 0);
 
   const groupTab = (g: PayGroup) => (
     <Link
@@ -94,6 +95,7 @@ export default async function PayPage({ searchParams }: { searchParams: Promise<
               <Th>Hourly $</Th>
               <Th>Units</Th>
               <Th>Unit $</Th>
+              {anySalary && <Th>Salary $</Th>}
               <Th>Total</Th>
             </tr>
           }
@@ -103,13 +105,14 @@ export default async function PayPage({ searchParams }: { searchParams: Promise<
               <Td>
                 <Link href={`/crm/pay/${r.staff_id}?g=${group}&p=${idx}`} className="font-medium text-ink hover:text-tulip hover:underline">{r.name}</Link>
                 <div className="text-xs text-stone">
-                  {[r.hourly_rate != null ? `${usd(r.hourly_rate)}/hr` : null, r.unit_rate != null ? `${usd(r.unit_rate)}/unit` : null].filter(Boolean).join(' · ') || 'no rate set'}
+                  {[r.hourly_rate != null ? `${usd(r.hourly_rate)}/hr` : null, r.unit_rate != null ? `${usd(r.unit_rate)}/unit` : null, r.salary_per_check != null ? `${usd(r.salary_per_check)}/check` : null].filter(Boolean).join(' · ') || 'no rate set'}
                 </div>
               </Td>
               <Td>{r.hours}</Td>
               <Td>{usd(r.hourlyPay)}</Td>
               <Td>{r.units.toLocaleString('en-US')}</Td>
               <Td>{usd(r.unitPay)}</Td>
+              {anySalary && <Td>{r.salaryPay ? usd(r.salaryPay) : '—'}</Td>}
               <Td><span className="font-medium tabular-nums text-ink">{usd(r.total)}</span></Td>
             </tr>
           ))}
@@ -119,6 +122,7 @@ export default async function PayPage({ searchParams }: { searchParams: Promise<
             <Td>{usd(totals.hourlyPay)}</Td>
             <Td>{totals.units.toLocaleString('en-US')}</Td>
             <Td>{usd(totals.unitPay)}</Td>
+            {anySalary && <Td>{usd(totals.salaryPay)}</Td>}
             <Td><span className="tabular-nums text-ink">{usd(totals.total)}</span></Td>
           </tr>
         </Table>

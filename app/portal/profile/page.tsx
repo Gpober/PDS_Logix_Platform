@@ -19,7 +19,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
   const period = payPeriodByIndex(idx, group);
   const pay = await workerPay(staff, period.start, period.end);
 
-  const hasRates = (staff.hourly_rate ?? 0) > 0 || (staff.unit_rate ?? 0) > 0;
+  const hasRates = (staff.hourly_rate ?? 0) > 0 || (staff.unit_rate ?? 0) > 0 || (staff.salary_per_check ?? 0) > 0;
   const isCurrent = idx === current.index;
 
   return (
@@ -37,6 +37,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
           <Row label="Phone" value={staff.phone ?? '—'} />
           <Row label="Hourly rate" value={staff.hourly_rate != null ? `${usd(staff.hourly_rate)}/hr` : 'Not set'} />
           <Row label="Per-unit rate" value={staff.unit_rate != null ? `${usd(staff.unit_rate)}/unit` : 'Not set'} />
+          {staff.salary_per_check != null && <Row label="Salary" value={`${usd(staff.salary_per_check)}/check`} />}
           <Row label="Pay group" value={`Group ${group} · bi-weekly`} />
         </dl>
         {!hasRates && (
@@ -77,6 +78,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
             label={`Units · ${pay.units.toLocaleString('en-US')}${staff.unit_rate != null ? ` × ${usd(pay.unitRate)}` : ''}`}
             value={usd(pay.unitPay)}
           />
+          {pay.salaryPay > 0 && <Row label="Salary (per check)" value={usd(pay.salaryPay)} />}
           <div className="flex items-center justify-between border-t border-line pt-2 font-medium text-ink">
             <span>Total</span>
             <span className="tabular-nums">{usd(pay.total)}</span>

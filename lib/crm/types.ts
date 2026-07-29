@@ -52,6 +52,7 @@ export interface Staff {
   notes: string | null;
   hourly_rate: number | null;      // $/hour base
   unit_rate: number | null;        // $/unit piece rate (added on top)
+  salary_per_check: number | null; // flat amount paid each pay period (on top)
   payroll_group: 'A' | 'B';        // which bi-weekly pay group they're on
   created_at: string;
   updated_at: string;
