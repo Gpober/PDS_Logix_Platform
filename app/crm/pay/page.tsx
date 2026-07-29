@@ -101,7 +101,7 @@ export default async function PayPage({ searchParams }: { searchParams: Promise<
           {active.map((r) => (
             <tr key={r.staff_id} className="hover:bg-blush/30">
               <Td>
-                <div className="font-medium text-ink">{r.name}</div>
+                <Link href={`/crm/pay/${r.staff_id}?g=${group}&p=${idx}`} className="font-medium text-ink hover:text-tulip hover:underline">{r.name}</Link>
                 <div className="text-xs text-stone">
                   {[r.hourly_rate != null ? `${usd(r.hourly_rate)}/hr` : null, r.unit_rate != null ? `${usd(r.unit_rate)}/unit` : null].filter(Boolean).join(' · ') || 'no rate set'}
                 </div>
