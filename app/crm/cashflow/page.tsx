@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { getCurrentProfile } from '@/lib/crm/data';
 import { buildCashForecast, listForecastAdjustments } from '@/lib/crm/forecast';
 import { addForecastAdjustment, deleteForecastAdjustment, setAnchorOverride } from '@/lib/crm/actions';
+import { createServerSupabase } from '@/lib/supabase/server';
 import { CrmHeader, Empty } from '@/components/crm/ui';
+import { CashSheetSync } from '@/components/crm/CashSheetSync';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +12,7 @@ const usd = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 const usd2 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 const fdate = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
-export default async function CashflowPage({ searchParams }: { searchParams: Promise<{ weeks?: string }> }) {
+export default async function CashflowPage({ searchParams }: { searchParams: Promise<{ weeks?: string; google?: string }> }) {
   const profile = await getCurrentProfile();
   if (profile?.role !== 'owner' && profile?.role !== 'admin') {
     return (<><CrmHeader title="Cash Flow" /><Empty>Cash forecasting is owner/admin-only.</Empty></>);
@@ -18,7 +20,13 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
 
   const sp = await searchParams;
   const weeks = sp.weeks === '13' ? 13 : sp.weeks === '26' ? 26 : 8;
-  const [f, adjustments] = await Promise.all([buildCashForecast({ weeks }), listForecastAdjustments()]);
+  const supabase = await createServerSupabase();
+  const [f, adjustments, settingsRes] = await Promise.all([
+    buildCashForecast({ weeks }),
+    listForecastAdjustments(),
+    supabase.from('forecast_settings').select('google_sheet_url, sheet_synced_at').eq('id', 'singleton').maybeSingle(),
+  ]);
+  const settings = (settingsRes.data as { google_sheet_url: string | null; sheet_synced_at: string | null } | null) ?? null;
 
   const maxBal = Math.max(1, ...f.weeks.map((w) => Math.abs(w.endingBalance)), Math.abs(f.anchor.balance));
   const lowNegative = f.lowPoint.balance < 0;
@@ -32,6 +40,8 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <CrmHeader title="Cash Flow" />
+      {sp.google === 'connected' && <p className="rounded-xl border border-[#4ADE80]/40 bg-[#4ADE80]/10 p-2 text-center text-sm text-ink">Google connected. Create a forecast sheet below.</p>}
+      {sp.google === 'error' && <p className="rounded-xl border border-[#F87171]/40 bg-[#F87171]/10 p-2 text-center text-sm text-ink">Couldn’t connect Google. Try again.</p>}
       <p className="-mt-4 text-center text-sm text-stone">
         Starting from last Friday’s cash ({sourceLabel}), rolled forward with real invoices in and payroll out.
       </p>
@@ -194,6 +204,13 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
           </label>
           <button className="rounded-full border border-line px-4 py-2.5 hover:border-ink">Save anchor</button>
         </form>
+      </div>
+
+      {/* Google Sheets live sync */}
+      <div className="rounded-2xl border border-line bg-white p-5">
+        <p className="text-xs uppercase tracking-wider text-stone">Google Sheets</p>
+        <p className="mt-1 mb-3 text-sm text-stone">Work the forecast in a live sheet — edit adjustments there and pull them back.</p>
+        <CashSheetSync initialSheetUrl={settings?.google_sheet_url ?? null} syncedAt={settings?.sheet_synced_at ?? null} />
       </div>
 
       <p className="text-center text-xs text-stone">
