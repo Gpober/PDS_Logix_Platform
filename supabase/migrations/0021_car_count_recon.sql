@@ -77,6 +77,7 @@ returns table (
 )
 language sql
 stable
+set search_path = public
 as $$
   with b as (
     select * from recon_batches where id = p_batch_id
@@ -180,6 +181,7 @@ create or replace function get_recon_summary(p_batch_id uuid)
 returns jsonb
 language sql
 stable
+set search_path = public
 as $$
   with r as (select * from recon_rows(p_batch_id)),
   b as (select * from recon_batches where id = p_batch_id)
@@ -236,6 +238,7 @@ create or replace function get_recon_exceptions(
 returns jsonb
 language sql
 stable
+set search_path = public
 as $$
   with f as (
     select * from recon_rows(p_batch_id)
