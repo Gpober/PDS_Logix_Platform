@@ -20,6 +20,13 @@ import {
   productionSummary,
 } from '@/lib/crm/data';
 import {
+  listReconBatches,
+  reconExceptions,
+  reconSummary,
+  resolveReconBatch,
+  type ReconStatus,
+} from '@/lib/crm/recon';
+import {
   assetLabel,
   JOB_STATUSES,
   SERVICE_TYPES,
@@ -209,6 +216,25 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
         location: { type: 'string', description: "Location name, e.g. 'Manheim Dallas' (optional; omit for all)." },
         from: { type: 'string', description: 'Start date YYYY-MM-DD (optional).' },
         to: { type: 'string', description: 'End date YYYY-MM-DD (optional).' },
+      },
+    },
+  },
+  {
+    name: 'list_recon_batches',
+    description:
+      'The car-count reconciliations on file (newest first): label, counterparty (usually Manheim), location, period, which files are loaded, and how many units are on each side. Use it to see what has been uploaded, or when someone names a reconciliation you need the id for.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'car_count_recon',
+    description:
+      "CAR COUNT RECONCILIATION — our unit count vs the auction's (Manheim). Someone uploads their statement/unit list on the Car Count Recon page (/crm/recon); this tool reads the finished match. Returns both counts, the variance (ours − theirs), how many matched by VIN, and the two exception buckets: only_theirs (they billed/listed a unit we never logged — usually a missed log or work we're not getting credit for internally) and only_ours (we logged it but it's not on their list — chase it for payment), plus the dollars on their side, and the day / location / service breakdown that shows where the gap opened. Matching is by VIN (last 6, duplicates counted), so a variance is real units, not rounding. Omit `batch` for the most recent reconciliation, or name one ('Manheim Dallas March'). Set `show` to pull the actual rows in a bucket (default only_theirs) and `limit` for how many. If nothing has been uploaded yet, say so and point them to /crm/recon — you cannot upload the file yourself.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        batch: { type: 'string', description: 'Which reconciliation — a label like "Manheim Dallas · March" or its id. Omit for the most recent.' },
+        show: { type: 'string', enum: ['only_theirs', 'only_ours', 'no_vin', 'matched', 'none'], description: "Which rows to include with the summary (default 'only_theirs'; 'none' for the scorecard alone)." },
+        limit: { type: 'number', description: 'How many rows to return (default 25, max 200).' },
       },
     },
   },
@@ -663,6 +689,8 @@ export const TOOL_LABELS: Record<string, string> = {
   get_lead: 'Reading the lead',
   client_performance: 'Ranking client performance',
   production: 'Counting production volume',
+  list_recon_batches: 'Listing reconciliations',
+  car_count_recon: 'Reconciling the car count',
   job_analytics: 'Analyzing the operation',
   get_invoices: 'Reading invoices',
   get_bills: 'Reading bills',
@@ -792,6 +820,65 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
         by_month: s.by_month,
         note: 'Units serviced (condition reports & photo sets). Operational volume, not dollars — pair with client_financials for revenue per unit.',
         source: 'Production log (Connecteam entries)',
+      };
+    }
+
+    case 'list_recon_batches': {
+      const batches = await listReconBatches();
+      return {
+        count: batches.length,
+        batches: batches.map((b) => ({
+          id: b.id,
+          label: b.label,
+          counterparty: b.counterparty,
+          location: b.location,
+          period: b.period_start ? `${b.period_start} → ${b.period_end ?? '…'}` : null,
+          their_units_loaded: b.theirs_rows,
+          our_units_uploaded: b.ours_rows,
+          our_side: b.ours_rows > 0 ? 'uploaded file' : 'production log',
+          uploaded_at: b.created_at,
+        })),
+        note: batches.length ? undefined : 'Nothing uploaded yet — the team loads the auction file on /crm/recon.',
+      };
+    }
+
+    case 'car_count_recon': {
+      const r = await resolveReconBatch(typeof input.batch === 'string' ? input.batch : undefined);
+      if (r.error) return { error: r.error, available: r.candidates };
+      const batch = r.batch!;
+      const s = await reconSummary(batch.id);
+
+      const showRaw = typeof input.show === 'string' ? input.show : 'only_theirs';
+      const show = ['only_theirs', 'only_ours', 'no_vin', 'matched', 'none'].includes(showRaw) ? showRaw : 'only_theirs';
+      const limit = clamp(input.limit, 25, 200);
+      const detail =
+        show === 'none'
+          ? null
+          : await reconExceptions({ batchId: batch.id, status: show as ReconStatus, limit });
+
+      return {
+        reconciliation: batch.label,
+        counterparty: batch.counterparty,
+        location: batch.location ?? 'all locations',
+        period: `${s.date_from ?? batch.period_start ?? '?'} → ${s.date_to ?? batch.period_end ?? '?'}`,
+        our_units: s.ours_units,
+        our_side_source: s.ours_source === 'production_log' ? 'the production log' : 'an uploaded count file',
+        their_units: s.theirs_units,
+        variance_ours_minus_theirs: s.variance,
+        matched_units: s.matched_units,
+        match_rate_pct: s.match_rate,
+        only_on_their_list: s.only_theirs,
+        only_on_our_list: s.only_ours,
+        rows_without_vin: { ours: s.no_vin_ours, theirs: s.no_vin_theirs },
+        their_charges_total: s.their_amount_total,
+        their_charges_on_unmatched: s.amount_only_theirs,
+        by_day: s.by_day,
+        by_location: s.by_location,
+        by_service: s.by_service,
+        rows: detail ? { bucket: show, count: detail.count, showing: detail.rows.length, units: detail.rows } : undefined,
+        other_reconciliations: r.candidates,
+        note: 'Matched VIN by VIN (last 6, duplicates counted). only_theirs = they listed a unit we never logged; only_ours = we logged one that is not on their list. Rows without a VIN can’t be matched either way — call them out separately rather than treating them as a gap.',
+        source: `Car count recon · ${batch.counterparty} file vs ${s.ours_source === 'production_log' ? 'our production log' : 'our uploaded count'}`,
       };
     }
 

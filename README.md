@@ -23,6 +23,12 @@ Cookie-authenticated, owner/admin/member roles. Tabs:
 - **Jobs** — service jobs with type (condition report / detailing / biohazard),
   a status flow (requested → scheduled → in_progress → completed → invoiced),
   pricing + margin, and a condition report for inspections
+- **Car Count Recon** — our car count vs the auction's (Manheim). Upload their
+  unit list (.csv / .xlsx) and it matches VIN by VIN against our production log
+  (or against our own uploaded count), giving both counts, the variance, and the
+  two exception buckets: units they billed that we never logged, and units we did
+  that never made their list — with their charges attached and a CSV export to
+  work the gaps. Zordon reads the same result with `car_count_recon`.
 - **Leads** — the inbound lead pipeline
 - **Assistant** — `Zordon`, the operations chief-of-staff (owner/admin only;
   needs `ANTHROPIC_API_KEY`). Reads live from the whole CRM and the books, and —
