@@ -239,6 +239,22 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'import_car_count',
+    description:
+      "GATED ACTION — load a car-count file the person just attached to this chat and run the reconciliation on it. Use it ONLY when the app has shown you an '[Attached car count: …]' preview; that preview means the file is parsed and waiting, so call this with NO units of your own (the app sends the file itself). Set `side` to 'theirs' for the auction's list (the default) or 'ours' for our own count file. Fill in `location` when you know which of our locations the file covers (it scopes our side of the match) and `counterparty` when it isn't Manheim; `label` names the reconciliation. Like every action it only runs when the person clicks Confirm — after they do, the card shows both counts and the variance, and you can call car_count_recon for the detail.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        side: { type: 'string', enum: ['theirs', 'ours'], description: "Whose count the file is (default 'theirs' — the auction's list)." },
+        counterparty: { type: 'string', description: "Who the file came from (default 'Manheim')." },
+        location: { type: 'string', description: "Our location the file covers, e.g. 'Manheim Dallas' — scopes our side of the match." },
+        label: { type: 'string', description: 'Name for this reconciliation, e.g. "Manheim Dallas · March".' },
+        period_start: { type: 'string', description: 'Start of the period, YYYY-MM-DD (optional — inferred from the file).' },
+        period_end: { type: 'string', description: 'End of the period, YYYY-MM-DD (optional — inferred from the file).' },
+      },
+    },
+  },
+  {
     name: 'job_analytics',
     description:
       'Deep operational rollup: jobs by status and by service type, pipeline vs invoiced totals, total and average margin (price − cost), and the completed jobs that are NOT yet invoiced (money on the table). Use for "how is the operation running" or "what should we invoice next".',
@@ -691,6 +707,7 @@ export const TOOL_LABELS: Record<string, string> = {
   production: 'Counting production volume',
   list_recon_batches: 'Listing reconciliations',
   car_count_recon: 'Reconciling the car count',
+  import_car_count: 'Preparing a car-count import',
   job_analytics: 'Analyzing the operation',
   get_invoices: 'Reading invoices',
   get_bills: 'Reading bills',
@@ -738,6 +755,7 @@ export const ACTION_TOOLS = [
   'import_contacts',
   'import_staff',
   'import_time',
+  'import_car_count',
 ];
 
 // ---- dispatch ---------------------------------------------------------------
@@ -1226,6 +1244,7 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'import_contacts':
     case 'import_staff':
     case 'import_time':
+    case 'import_car_count':
       return { error: 'This action must be confirmed by the user; it cannot run directly.' };
 
     default:

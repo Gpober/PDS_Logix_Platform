@@ -127,6 +127,10 @@
   #report-print-area .border-line { border-color: #d7dde2 !important; }
   /* Inline light "ink" values (KPI figures, callout text) → dark for print. */
   #report-print-area [style*="#F2F5F8"] { color: #0a0c10 !important; }
+  /* A PDF is always page-width, so print the real table even when the phone
+     layout (row cards) is what's on screen. */
+  #report-print-area .report-table { display: block !important; }
+  #report-print-area .report-cards { display: none !important; }
   /* Keep cards, charts and tables from splitting across pages. */
   #report-print-area svg,
   #report-print-area table,

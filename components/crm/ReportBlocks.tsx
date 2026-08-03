@@ -15,11 +15,11 @@ const nf = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 }
 
 function Kpis({ items }: { items: Extract<ReportBlock, { type: 'kpis' }>['items'] }) {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
       {items.map((k, i) => (
-        <div key={i} className="rounded-2xl border border-line bg-white p-5 text-center">
+        <div key={i} className="rounded-2xl border border-line bg-white p-3 text-center sm:p-5">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone">{k.label}</div>
-          <div className="mt-2 font-display text-2xl" style={{ color: TONE_HEX[k.tone ?? 'ink'] }}>
+          <div className="mt-2 break-words font-display text-xl sm:text-2xl" style={{ color: TONE_HEX[k.tone ?? 'ink'] }}>
             {k.value}
           </div>
         </div>
@@ -80,9 +80,11 @@ function LineChart({ block }: { block: Extract<ReportBlock, { type: 'line' }> })
             <circle key={i} cx={x(i)} cy={y(p.value)} r="2.5" fill={LINE} />
           ))}
         </svg>
+        {/* With many points the labels collide on a phone, so show every other
+            one there and all of them from sm up. */}
         <div className="mt-2 flex justify-between text-[11px] text-stone">
           {pts.map((p, i) => (
-            <span key={i} className="tabular-nums">
+            <span key={i} className={'tabular-nums' + (pts.length > 6 && i % 2 === 1 ? ' hidden sm:inline' : '')}>
               {p.label}
             </span>
           ))}
@@ -96,7 +98,27 @@ function DataTable({ block }: { block: Extract<ReportBlock, { type: 'table' }> }
   return (
     <div>
       {block.title && <h3 className="mb-3 font-display text-lg">{block.title}</h3>}
-      <div className="overflow-x-auto rounded-2xl border border-line bg-white">
+
+      {/* Phone: each row becomes a card of label/value pairs, so a wide table
+          reads top-to-bottom instead of scrolling sideways. */}
+      <div className="report-cards space-y-2 sm:hidden">
+        {block.rows.map((r, i) => (
+          <div key={i} className="rounded-2xl border border-line bg-white p-3">
+            <div className="font-medium text-ink">{r[0]}</div>
+            <dl className="mt-1.5 space-y-1">
+              {block.columns.slice(1).map((c, j) => (
+                <div key={j} className="flex items-baseline justify-between gap-3 text-sm">
+                  <dt className="text-xs uppercase tracking-wider text-stone">{c}</dt>
+                  <dd className="text-right tabular-nums text-stone">{r[j + 1] ?? '—'}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+        {block.rows.length === 0 && <p className="text-sm text-stone">No rows.</p>}
+      </div>
+
+      <div className="report-table hidden overflow-x-auto rounded-2xl border border-line bg-white sm:block">
         <table className="w-full text-sm">
           <thead className="border-b border-line text-xs uppercase tracking-wider text-stone">
             <tr>
@@ -126,7 +148,7 @@ function DataTable({ block }: { block: Extract<ReportBlock, { type: 'table' }> }
 
 export function ReportBlocks({ blocks }: { blocks: ReportBlock[] }) {
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {blocks.map((b, i) => {
         if (b.type === 'kpis') return <Kpis key={i} items={b.items} />;
         if (b.type === 'bar') return <Bars key={i} block={b} />;
