@@ -21,6 +21,7 @@ const groups = [
     { href: '/crm/jobs', label: 'Jobs' },
     { href: '/crm/assets', label: 'Assets' },
     { href: '/crm/production', label: 'Production' },
+    { href: '/crm/recon', label: 'Car Count Recon' },
   ] },
   { key: 'people', label: 'People & Pay', items: [
     { href: '/crm/staff', label: 'Team' },

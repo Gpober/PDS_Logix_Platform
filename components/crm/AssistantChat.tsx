@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ASSISTANT_NAME } from '@/lib/assistant/config';
+import { looksLikeCarCount } from '@/lib/crm/carCountSniff';
 
 interface PendingAction {
   name: string;
@@ -15,6 +16,11 @@ type ImportRow = { company: string; name?: string; title?: string; email?: strin
 type StaffRow = { name: string; title?: string; email?: string; phone?: string; active?: boolean };
 type TimeRow = { employee: string; date?: string; clock_in?: string; clock_out?: string; hours?: string; notes?: string };
 
+// A car-count file (a Manheim statement or our own count) parsed server-side.
+// The rows stay on the server side of the wire — the browser keeps only this
+// summary plus the file itself, which it re-sends if the human confirms.
+type CarCount = { key: string; count: number; noVin: number; dateFrom: string | null; dateTo: string | null };
+
 interface Attachment {
   url: string; // data URL (empty for text files)
   name: string;
@@ -23,6 +29,7 @@ interface Attachment {
   contacts?: ImportRow[]; // full rows parsed in the browser (for import_contacts)
   staff?: StaffRow[]; // parsed team/people rows (for import_staff)
   timeEntries?: TimeRow[]; // parsed time-clock rows (for import_time)
+  carCount?: CarCount; // a car-count file waiting on import_car_count
 }
 
 interface Msg {
@@ -48,6 +55,9 @@ const TOOL_LABELS: Record<string, string> = {
   get_lead: 'Reading the lead',
   client_performance: 'Ranking client performance',
   production: 'Counting production volume',
+  list_recon_batches: 'Listing reconciliations',
+  car_count_recon: 'Reconciling the car count',
+  import_car_count: 'Preparing a car-count import',
   job_analytics: 'Analyzing the operation',
   get_invoices: 'Reading invoices',
   get_bills: 'Reading bills',
@@ -81,6 +91,11 @@ const TOOL_LABELS: Record<string, string> = {
 };
 const labelFor = (name: string) => TOOL_LABELS[name] ?? name;
 
+// What screen is this being read on? Sent with each turn so Zordon sizes its
+// answers and reports for a phone instead of a desktop.
+const deviceKind = (): 'phone' | 'desktop' =>
+  typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches ? 'phone' : 'desktop';
+
 const STARTERS = [
   'How are we doing right now — jobs, pipeline, and invoiced totals?',
   'Which completed jobs haven’t been invoiced yet?',
@@ -109,6 +124,12 @@ const isTextLike = (file: File): boolean =>
   file.type === 'text/tab-separated-values' ||
   file.type === 'application/vnd.ms-excel' ||
   /\.(csv|tsv|txt)$/i.test(file.name);
+
+// Excel workbooks: the browser can't read these without shipping a spreadsheet
+// parser to every visitor, so they go straight to the server for a look.
+const isWorkbook = (file: File): boolean =>
+  file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+  /\.(xlsx|xls)$/i.test(file.name);
 
 function parseDelimited(text: string, delimiter: string): string[][] {
   const rows: string[][] = [];
@@ -292,6 +313,47 @@ function timePreview(fileName: string, rows: TimeRow[]): string {
   );
 }
 
+// ---- car-count files (Manheim statements) ----------------------------------
+function isCarCountCsv(text: string, fileName: string): boolean {
+  const first = text.split('\n', 1)[0] ?? '';
+  return looksLikeCarCount(parseDelimited(first, sniffDelim(first, fileName))[0] ?? []);
+}
+
+// Ask the server what's in the file. Nothing is stored — this is only so Zordon
+// can describe it before proposing the import.
+async function previewCarCount(file: File): Promise<{
+  count: number; no_vin: number; date_from: string | null; date_to: string | null;
+  locations: string[]; amount_total: number | null; columns: string[];
+  sample: { vin6: string | null; day: string | null; ref: string | null; service: string | null; amount: number | null }[];
+} | null> {
+  const body = new FormData();
+  body.append('file', file);
+  try {
+    const res = await fetch('/api/recon/preview', { method: 'POST', body });
+    const data = await res.json().catch(() => ({}));
+    return res.ok && data.ok ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+function carCountPreview(fileName: string, p: NonNullable<Awaited<ReturnType<typeof previewCarCount>>>): string {
+  const head = p.sample
+    .map((s) => [s.day ?? '—', s.vin6 ?? 'no VIN', s.ref ?? '—', s.service ?? '—', s.amount == null ? '—' : `$${s.amount}`].join(' | '))
+    .join('\n');
+  const window = p.date_from ? `${p.date_from} → ${p.date_to}` : 'no dates in the file';
+  return (
+    `[Attached car count: ${fileName}] — ${p.count} units parsed (VIN / date / work order / service / amount), ${window}` +
+    `${p.locations.length ? `, locations in the file: ${p.locations.join(', ')}` : ''}` +
+    `${p.amount_total != null ? `, charges totalling $${p.amount_total.toLocaleString('en-US')}` : ''}` +
+    `${p.no_vin ? `, ${p.no_vin} row(s) without a VIN` : ''}. ` +
+    `This is a car-count file for reconciliation. The app holds the file; propose import_car_count (side "theirs" unless ` +
+    `they say it's our own count) and it loads EVERY row on confirm and reconciles it against our production log. ` +
+    `Ask which of our locations it covers if the file doesn't make that obvious — it scopes our side of the match. ` +
+    `Sample (first ${p.sample.length} of ${p.count}), date | VIN | ref | service | amount:\n${head}`
+  );
+}
+
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -301,10 +363,35 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
-async function fileToAttachment(file: File): Promise<Attachment | null> {
+async function fileToAttachment(file: File, keepFile: (file: File) => string): Promise<Attachment | null> {
+  // A workbook can only be read server-side; the only thing we do with one is
+  // look for a car count.
+  if (isWorkbook(file)) {
+    const name = file.name || 'workbook.xlsx';
+    const car = await previewCarCount(file);
+    if (car) {
+      return {
+        url: '', name, kind: 'text', text: carCountPreview(name, car),
+        carCount: { key: keepFile(file), count: car.count, noVin: car.no_vin, dateFrom: car.date_from, dateTo: car.date_to },
+      };
+    }
+    return { url: '', name, kind: 'text', text: `[Attached spreadsheet: ${name}] — couldn’t read it as a car-count file. Ask what's in it, or point them to /crm/recon to upload it there.` };
+  }
+
   if (isTextLike(file)) {
     const raw = (await file.text()).slice(0, 2_000_000);
     const name = file.name || 'data.csv';
+    // A vehicle list (VINs, no people) is a car count — checked first because
+    // the people parsers below would otherwise mistake some of them for a roster.
+    if (isCarCountCsv(raw, name)) {
+      const car = await previewCarCount(file);
+      if (car) {
+        return {
+          url: '', name, kind: 'text', text: carCountPreview(name, car),
+          carCount: { key: keepFile(file), count: car.count, noVin: car.no_vin, dateFrom: car.date_from, dateTo: car.date_to },
+        };
+      }
+    }
     // Time-clock export (most specific: needs in/out or hours) → staff roster → contacts.
     const time = parseTimeCsv(raw, name);
     if (time && time.length) return { url: '', name, kind: 'text', text: timePreview(name, time), timeEntries: time };
@@ -372,6 +459,11 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Car-count files held for a confirm. Not persisted — after a reload the
+  // pending card says to re-attach rather than importing something stale.
+  const heldFiles = useRef<Map<string, File>>(new Map());
+  const fileSeq = useRef(0);
+  const [reading, setReading] = useState(false); // a dropped file is being read
   const hydrated = useRef(false);
   const storageKey = 'zordon-chat:pds';
 
@@ -428,6 +520,41 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
 
   async function confirmAction(mi: number, ai: number, action: PendingAction) {
     updateAction(mi, ai, { status: 'running' });
+
+    // The car-count import sends the file itself rather than a JSON payload of
+    // every row, so it runs through the same upload the recon page uses.
+    if (action.name === 'import_car_count') {
+      const file = heldFiles.current.get(String(action.input.file_key ?? ''));
+      if (!file) {
+        updateAction(mi, ai, { status: 'error', result: 'The file is no longer attached (the page reloaded). Attach it again and I’ll load it.' });
+        return;
+      }
+      const body = new FormData();
+      body.append('file', file);
+      for (const k of ['side', 'counterparty', 'location', 'label', 'period_start', 'period_end'] as const) {
+        const v = action.input[k];
+        if (typeof v === 'string' && v.trim()) body.append(k, v.trim());
+      }
+      try {
+        const res = await fetch('/api/recon/import', { method: 'POST', body });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          const s = data.summary ?? {};
+          const variance = typeof s.variance === 'number' ? `${s.variance > 0 ? '+' : ''}${s.variance}` : '—';
+          updateAction(mi, ai, {
+            status: 'done',
+            result:
+              `${data.message} Our count ${s.ours_units ?? '—'} vs theirs ${s.theirs_units ?? '—'} · variance ${variance} · ` +
+              `${s.only_theirs ?? 0} on their list we never logged, ${s.only_ours ?? 0} on ours they didn’t list. ` +
+              `Ask me to walk the exceptions, or open Car Count Recon.`,
+          });
+        } else updateAction(mi, ai, { status: 'error', result: data.error ?? 'Import failed.' });
+      } catch {
+        updateAction(mi, ai, { status: 'error', result: 'Couldn’t reach the server.' });
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/assistant/action', {
         method: 'POST',
@@ -457,7 +584,7 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
       const res = await fetch('/api/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: toApiMessages(next) }),
+        body: JSON.stringify({ messages: toApiMessages(next), device: deviceKind() }),
       });
 
       if (!res.ok || !res.body) {
@@ -502,6 +629,9 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
             } else if (a.name === 'import_time') {
               const parsed = imgs.flatMap((att) => att.timeEntries ?? []);
               if (parsed.length) inp = { ...inp, entries: parsed };
+            } else if (a.name === 'import_car_count') {
+              const car = imgs.find((att) => att.carCount)?.carCount;
+              if (car) inp = { ...inp, file_key: car.key, file_units: car.count };
             }
             patchLast((m) => ({ ...m, actions: [...(m.actions ?? []), { name: a.name, input: inp, status: 'pending' }] }));
           } else if (ev.t === 'error') patchLast((m) => ({ ...m, content: m.content + `\n\n[${String(ev.v)}]` }));
@@ -515,10 +645,22 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
   }
 
   async function addFiles(files: FileList | File[]) {
-    const ok = Array.from(files).filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf' || isTextLike(f));
+    const ok = Array.from(files).filter(
+      (f) => f.type.startsWith('image/') || f.type === 'application/pdf' || isTextLike(f) || isWorkbook(f),
+    );
     if (!ok.length) return;
-    const atts = (await Promise.all(ok.map(fileToAttachment))).filter((a): a is Attachment => !!a);
-    if (atts.length) setAttachments((prev) => [...prev, ...atts].slice(0, 6));
+    const keepFile = (file: File) => {
+      const key = `file-${++fileSeq.current}`;
+      heldFiles.current.set(key, file);
+      return key;
+    };
+    setReading(true);
+    try {
+      const atts = (await Promise.all(ok.map((f) => fileToAttachment(f, keepFile)))).filter((a): a is Attachment => !!a);
+      if (atts.length) setAttachments((prev) => [...prev, ...atts].slice(0, 6));
+    } finally {
+      setReading(false);
+    }
   }
 
   const empty = messages.length === 0;
@@ -614,13 +756,19 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
         )}
       </div>
 
-      {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 border-t border-line pt-3">
+      {(attachments.length > 0 || reading) && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
           {attachments.map((att, k) => (
             <div key={k} className="relative">
               {att.kind !== 'image' ? (
                 <span className="flex h-16 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-xs text-ink">
-                  {att.kind === 'text' ? '📊' : '📄'} <span className="max-w-[7rem] truncate">{att.name}</span>
+                  {att.kind === 'text' ? '📊' : '📄'}
+                  <span className="flex flex-col">
+                    <span className="max-w-[7rem] truncate">{att.name}</span>
+                    {att.carCount && (
+                      <span className="text-[10px] text-stone">{att.carCount.count.toLocaleString('en-US')} units</span>
+                    )}
+                  </span>
                 </span>
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -636,6 +784,7 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
               </button>
             </div>
           ))}
+          {reading && <span className="text-xs text-stone">Reading the file…</span>}
         </div>
       )}
 
@@ -649,7 +798,7 @@ export function AssistantChat({ userName }: { userName?: string | null }) {
         <input
           ref={fileRef}
           type="file"
-          accept="image/*,application/pdf,.csv,.tsv,.txt,text/csv,text/plain"
+          accept="image/*,application/pdf,.csv,.tsv,.txt,.xlsx,.xls,text/csv,text/plain"
           multiple
           className="hidden"
           onChange={(e) => {

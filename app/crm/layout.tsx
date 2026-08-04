@@ -52,7 +52,7 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
             </form>
           </div>
         </header>
-        <main className="px-5 py-8">{children}</main>
+        <main className="px-4 py-6 sm:px-5 sm:py-8">{children}</main>
       </div>
     </div>
   );

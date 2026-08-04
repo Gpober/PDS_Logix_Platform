@@ -22,12 +22,15 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { messages?: unknown };
+  let body: { messages?: unknown; device?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
+  // The client tells us what it's on, so reports get composed for the screen
+  // they'll be read on.
+  const device = body.device === 'phone' ? 'phone' : 'desktop';
 
   const messages = normalizeIncomingMessages(body.messages);
   if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {
@@ -35,7 +38,7 @@ export async function POST(req: Request) {
   }
 
   const memories = await listAssistantMemories();
-  const system = buildSystemPrompt(profile, memories);
+  const system = buildSystemPrompt(profile, memories, { device });
 
   // NDJSON stream: one JSON object per line.
   //   {t:'text', v:string} | {t:'tool', v:string} |
