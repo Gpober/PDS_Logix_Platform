@@ -25,7 +25,15 @@ export default async function ContactsPage() {
         >
           {contacts.map((c) => (
             <tr key={c.id} className="hover:bg-blush/30">
-              <Td>{c.name}</Td>
+              <Td>
+                {c.client_id ? (
+                  <Link href={`/crm/clients/${c.client_id}`} className="font-medium hover:underline">
+                    {c.name}
+                  </Link>
+                ) : (
+                  <span className="font-medium">{c.name}</span>
+                )}
+              </Td>
               <Td>{c.title ?? '—'}</Td>
               <Td>
                 {c.client_id ? (
