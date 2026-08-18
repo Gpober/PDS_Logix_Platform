@@ -176,6 +176,15 @@ export interface Lead {
   message: string | null;
   source: string;
   created_at: string;
+  // Outreach / prospecting fields
+  contact_title: string | null;
+  state: string | null;
+  linkedin_url: string | null;
+  address: string | null;
+  lead_group: string | null;
+  status: string | null;
+  external_ref: string | null;
+  updated_at: string | null;
 }
 
 export interface TimeEntry {
