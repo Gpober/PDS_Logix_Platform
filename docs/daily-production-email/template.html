@@ -1,0 +1,128 @@
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5F7FA;margin:0;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,Helvetica,sans-serif;">
+<tr><td align="center">
+<table role="presentation" width="760" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:760px;background-color:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;">
+
+<!-- WARNING_BANNER -->
+
+<tr><td style="background-color:#1A2332;padding:24px 28px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td align="left" valign="middle">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="40" style="background-color:#D97706;border-radius:8px;height:40px;text-align:center;font-family:Consolas,Menlo,monospace;font-weight:700;font-size:14px;color:#1A2332;">PDS</td>
+        <td style="padding-left:14px;">
+          <div style="color:#F5F7FA;font-size:17px;font-weight:600;">Production Report</div>
+          <div style="color:#94A3B8;font-size:12px;font-family:Consolas,Menlo,monospace;padding-top:3px;">PDS Logix &middot; Daily Summary</div>
+        </td>
+      </tr></table>
+    </td>
+    <td align="right" valign="middle">
+      <div style="font-family:Consolas,Menlo,monospace;font-size:10px;color:#94A3B8;letter-spacing:0.06em;">AS OF</div>
+      <div style="font-family:Consolas,Menlo,monospace;font-size:15px;font-weight:700;color:#F5F7FA;padding-top:3px;">{{AS_OF}}</div>
+    </td>
+  </tr></table>
+</td></tr>
+
+<tr><td style="padding:16px 28px;border-bottom:1px solid #E2E8F0;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td style="background-color:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:7px 12px;">
+      <span style="font-size:10px;font-weight:700;color:#64748B;letter-spacing:0.05em;">YESTERDAY</span>
+      <span style="font-family:Consolas,Menlo,monospace;font-size:13px;font-weight:700;color:#1A2332;padding-left:8px;">{{DAY_CRS}} CRS</span>
+      <span style="color:#94A3B8;padding:0 4px;">&middot;</span>
+      <span style="font-family:Consolas,Menlo,monospace;font-size:13px;font-weight:700;color:#1A2332;">{{DAY_PHOTO}} Photo</span>
+    </td>
+    <td width="8"></td>
+    <td style="background-color:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;padding:7px 12px;">
+      <span style="font-size:10px;font-weight:700;color:#64748B;letter-spacing:0.05em;">THIS WEEK</span>
+      <span style="font-family:Consolas,Menlo,monospace;font-size:13px;font-weight:700;color:#1A2332;padding-left:8px;">{{WEEK_CRS}} CRS</span>
+      <span style="color:#94A3B8;padding:0 4px;">&middot;</span>
+      <span style="font-family:Consolas,Menlo,monospace;font-size:13px;font-weight:700;color:#1A2332;">{{WEEK_PHOTO}} Photo</span>
+    </td>
+    <td width="8"></td>
+    <td style="background-color:#FFF7ED;border:1px solid #FED7AA;border-radius:6px;padding:7px 12px;">
+      <span style="font-size:10px;font-weight:700;color:#64748B;letter-spacing:0.05em;">THIS MONTH</span>
+      <span style="font-family:Consolas,Menlo,monospace;font-size:13px;font-weight:700;color:#1A2332;padding-left:8px;">{{MONTH_CRS}} CRS</span>
+      <span style="color:#94A3B8;padding:0 4px;">&middot;</span>
+      <span style="font-family:Consolas,Menlo,monospace;font-size:13px;font-weight:700;color:#1A2332;">{{MONTH_PHOTO}} Photo</span>
+    </td>
+  </tr></table>
+</td></tr>
+
+<tr><td style="padding:14px 24px 10px;border-bottom:1px solid #E2E8F0;">
+  <span style="background-color:#FFF7ED;color:#C2410C;font-size:10px;font-weight:700;letter-spacing:0.1em;padding:4px 8px;border-radius:4px;">PIECEWORK</span>
+  <span style="font-size:13px;font-weight:600;color:#1A2332;padding-left:10px;">Revenue by piece</span>
+  <span style="font-size:11px;color:#94A3B8;font-family:Consolas,Menlo,monospace;padding-left:10px;">rev price &times; pieces</span>
+</td></tr>
+<tr><td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">
+  <tr>
+    <th style="border-bottom:none;"></th>
+    <th colspan="2" style="background-color:#EFF6FF;color:#2563EB;padding:10px 0 4px;font-size:10px;font-weight:700;letter-spacing:0.08em;">YESTERDAY</th>
+    <th colspan="2" style="background-color:#F0FDF4;color:#16A34A;padding:10px 0 4px;font-size:10px;font-weight:700;letter-spacing:0.08em;">THIS WEEK</th>
+    <th colspan="2" style="background-color:#FFF7ED;color:#EA580C;padding:10px 0 4px;font-size:10px;font-weight:700;letter-spacing:0.08em;">THIS MONTH</th>
+  </tr>
+  <tr>
+    <th align="left" style="padding:6px 14px 10px 24px;font-size:10px;font-weight:600;letter-spacing:0.05em;color:#94A3B8;border-bottom:2px solid #E2E8F0;">WORKER</th>
+    <th align="right" style="background-color:#EFF6FF;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">PIECES</th>
+    <th align="right" style="background-color:#EFF6FF;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">REV</th>
+    <th align="right" style="background-color:#F0FDF4;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">PIECES</th>
+    <th align="right" style="background-color:#F0FDF4;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">REV</th>
+    <th align="right" style="background-color:#FFF7ED;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">PIECES</th>
+    <th align="right" style="background-color:#FFF7ED;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">REV</th>
+  </tr>
+<!-- PIECEWORK_ROWS -->
+  <tr>
+    <td style="background-color:#1A2332;color:#94A3B8;padding:14px 14px 14px 24px;font-size:12px;letter-spacing:0.06em;border-top:2px solid #E2E8F0;">TOTALS</td>
+    <td align="right" style="background-color:#1A2332;color:#F5F7FA;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PW_D_PC}}</td>
+    <td align="right" style="background-color:#1A2332;color:#FCD34D;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PW_D_REV}}</td>
+    <td align="right" style="background-color:#1A2332;color:#F5F7FA;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PW_W_PC}}</td>
+    <td align="right" style="background-color:#1A2332;color:#FCD34D;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PW_W_REV}}</td>
+    <td align="right" style="background-color:#1A2332;color:#F5F7FA;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PW_M_PC}}</td>
+    <td align="right" style="background-color:#1A2332;color:#FCD34D;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PW_M_REV}}</td>
+  </tr>
+</table>
+</td></tr>
+
+<tr><td style="padding:14px 24px 10px;border-top:1px solid #E2E8F0;border-bottom:1px solid #E2E8F0;">
+  <span style="background-color:#EEF2FF;color:#3730A3;font-size:10px;font-weight:700;letter-spacing:0.1em;padding:4px 8px;border-radius:4px;">PHOTO DEPT</span>
+  <span style="font-size:13px;font-weight:600;color:#1A2332;padding-left:10px;">Revenue by piece</span>
+  <span style="font-size:11px;color:#94A3B8;font-family:Consolas,Menlo,monospace;padding-left:10px;">$5.00/pc &times; pieces</span>
+</td></tr>
+<tr><td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">
+  <tr>
+    <th style="border-bottom:none;"></th>
+    <th colspan="2" style="background-color:#EEF2FF;color:#4338CA;padding:10px 0 4px;font-size:10px;font-weight:700;letter-spacing:0.08em;">YESTERDAY</th>
+    <th colspan="2" style="background-color:#ECFDF5;color:#16A34A;padding:10px 0 4px;font-size:10px;font-weight:700;letter-spacing:0.08em;">THIS WEEK</th>
+    <th colspan="2" style="background-color:#FFF7ED;color:#EA580C;padding:10px 0 4px;font-size:10px;font-weight:700;letter-spacing:0.08em;">THIS MONTH</th>
+  </tr>
+  <tr>
+    <th align="left" style="padding:6px 14px 10px 24px;font-size:10px;font-weight:600;letter-spacing:0.05em;color:#94A3B8;border-bottom:2px solid #E2E8F0;">WORKER</th>
+    <th align="right" style="background-color:#EEF2FF;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">PIECES</th>
+    <th align="right" style="background-color:#EEF2FF;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">REV</th>
+    <th align="right" style="background-color:#ECFDF5;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">PIECES</th>
+    <th align="right" style="background-color:#ECFDF5;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">REV</th>
+    <th align="right" style="background-color:#FFF7ED;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">PIECES</th>
+    <th align="right" style="background-color:#FFF7ED;padding:6px 14px 10px;font-size:10px;font-weight:600;color:#94A3B8;border-bottom:2px solid #E2E8F0;">REV</th>
+  </tr>
+<!-- PHOTO_ROWS -->
+  <tr>
+    <td style="background-color:#3B4F6B;color:#CBD5E1;padding:14px 14px 14px 24px;font-size:12px;letter-spacing:0.06em;border-top:2px solid #E2E8F0;">TOTALS</td>
+    <td align="right" style="background-color:#3B4F6B;color:#F5F7FA;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PH_D_PC}}</td>
+    <td align="right" style="background-color:#3B4F6B;color:#FCD34D;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PH_D_REV}}</td>
+    <td align="right" style="background-color:#3B4F6B;color:#F5F7FA;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PH_W_PC}}</td>
+    <td align="right" style="background-color:#3B4F6B;color:#FCD34D;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PH_W_REV}}</td>
+    <td align="right" style="background-color:#3B4F6B;color:#F5F7FA;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PH_M_PC}}</td>
+    <td align="right" style="background-color:#3B4F6B;color:#FCD34D;padding:14px;font-family:Consolas,Menlo,monospace;font-weight:700;border-top:2px solid #E2E8F0;">{{PH_M_REV}}</td>
+  </tr>
+</table>
+</td></tr>
+
+<tr><td style="padding:18px 28px;border-top:1px solid #E2E8F0;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td align="left" style="font-size:11px;color:#94A3B8;font-family:Consolas,Menlo,monospace;">CRS Rev = rev price &times; pieces &middot; Photo Rev = $5.00/pc &times; pieces &middot; synced nightly</td>
+    <td align="right" style="font-size:11px;color:#94A3B8;">Powered by <strong style="color:#D97706;">I Am CFO</strong></td>
+  </tr></table>
+</td></tr>
+
+</table>
+</td></tr></table>
