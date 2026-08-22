@@ -47,3 +47,31 @@ an owner with:
 ```sql
 update public.profiles set role = 'owner' where email = 'you@pdslogix.com';
 ```
+
+## Nightly production sync (lives in the cloud, not in this repo)
+
+`production_entries` is filled by a chain that spans two Supabase projects and a
+GitHub Action. Nothing but the watchdog below is checked in, so grep won't find
+it — check the dashboard:
+
+1. **Hourly** — `sync-connecteam.yml` in the `pdsLogix` repo pulls new Connecteam
+   form submissions into the **PDS Lgix** platform project
+   (`bdtmsfbhaztukqppnhdk`), table `connecteam_form_submissions`.
+2. **Nightly 06:15 UTC** — pg_cron job `production-nightly-sync` in THIS database
+   `net.http_post`s the edge function `sync-production`, which reads yesterday
+   from that platform project, maps each submitter to a `staff` row, and calls
+   `ingest_production()` here. Every run appends to `production_sync_log`.
+3. **Nightly 06:30 UTC** — pg_cron job `production-sync-watchdog`
+   (`migrations/0022_production_sync_watchdog.sql`) re-reads that log and raises
+   if the last run failed or never happened.
+
+The watchdog exists because both earlier steps report success while doing
+nothing: `net.http_post` only queues the request, so the cron job goes green
+even when the function 500s. In Aug 2026 the platform project was paused for
+three days — its hostname stopped resolving, both the hourly upserts and the
+nightly read failed, and every status light stayed green while
+`production_entries` silently stopped at Aug 18.
+
+Known rough edge: the edge function has the platform anon key and its
+`x-sync-token` hardcoded in the deployed source, and the cron job's SQL repeats
+them. Worth moving to function secrets.
