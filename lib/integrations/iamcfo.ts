@@ -75,6 +75,10 @@ export interface IamcfoInvoice {
   terms?: string;
   description?: string;
   memo?: string;
+  // When QuickBooks says it was ENTERED / last edited — not the invoice
+  // date. A July-dated invoice keyed in on Aug 3 has an August createdAt.
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface IamcfoBill {
@@ -86,26 +90,47 @@ export interface IamcfoBill {
   paid?: boolean;
   txnDate?: string;
   dueDate?: string;
+  // QuickBooks' entry timestamps — see IamcfoInvoice.
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-export async function getInvoices(opts: { number?: string; openOnly?: boolean; limit?: number }): Promise<
+export async function getInvoices(opts: {
+  number?: string;
+  openOnly?: boolean;
+  limit?: number;
+  // Filter on when the document was ENTERED in QuickBooks (YYYY-MM-DD), so
+  // a month's question catches entries backdated into an earlier month.
+  createdFrom?: string;
+  createdTo?: string;
+}): Promise<
   Result<{ found?: boolean; invoice?: IamcfoInvoice; count?: number; invoices?: IamcfoInvoice[] }>
 > {
   const p = new URLSearchParams();
   if (opts.number) p.set('number', opts.number);
   if (opts.openOnly) p.set('status', 'open');
   if (opts.limit) p.set('limit', String(opts.limit));
+  if (opts.createdFrom) p.set('createdFrom', opts.createdFrom);
+  if (opts.createdTo) p.set('createdTo', opts.createdTo);
   const qs = p.toString();
   return request('GET', `/api/partner/invoice${qs ? `?${qs}` : ''}`);
 }
 
-export async function getBills(opts: { number?: string; openOnly?: boolean; limit?: number }): Promise<
+export async function getBills(opts: {
+  number?: string;
+  openOnly?: boolean;
+  limit?: number;
+  createdFrom?: string;
+  createdTo?: string;
+}): Promise<
   Result<{ found?: boolean; bill?: IamcfoBill; count?: number; bills?: IamcfoBill[] }>
 > {
   const p = new URLSearchParams();
   if (opts.number) p.set('number', opts.number);
   if (opts.openOnly) p.set('status', 'open');
   if (opts.limit) p.set('limit', String(opts.limit));
+  if (opts.createdFrom) p.set('createdFrom', opts.createdFrom);
+  if (opts.createdTo) p.set('createdTo', opts.createdTo);
   const qs = p.toString();
   return request('GET', `/api/partner/bill${qs ? `?${qs}` : ''}`);
 }
