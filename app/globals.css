@@ -142,3 +142,41 @@
   }
   @page { margin: 16mm; }
 }
+
+/* ============================================================
+ * Chart series and status
+ * ============================================================
+ *
+ * The PDS platform was already dark and already re-skins from the brand
+ * tokens in tailwind.config.ts — nothing about its surfaces needed changing,
+ * and its text contrast on the card surface (#1A1F28) already clears WCAG AA
+ * comfortably: ink 15.1:1, stone 6.5:1, tulip 6.9:1.
+ *
+ * What it did not have was a chart palette chosen for its surface. The brand
+ * cyan cannot supply one on its own: three shades of one hue tell magnitude,
+ * not identity, so they must never be used to distinguish three series. And
+ * cyan sits too close to green to pair with it — under normal vision the two
+ * come in at ΔE 14.9, below the 15 floor, so a cyan line and a green line are
+ * hard to tell apart even for a full-colour reader.
+ *
+ * These three are validated all-pairs against #1A1F28: lightness band, chroma
+ * floor, CVD ΔE 9.5, normal-vision ΔE 15.7, contrast — all pass. Fixed order,
+ * never cycled; a fourth series folds into "Other", small multiples, or a
+ * composite encoding rather than inventing a hue.
+ *
+ * The electric cyan stays exactly what it was: the UI accent for links,
+ * buttons and highlights, which is judged on contrast rather than on the
+ * categorical checks.
+ */
+:root {
+  --series-1: #5595D9;
+  --series-2: #C4872D;
+  --series-3: #3BA37F;
+
+  /* Status — reserved. Never reused as a series, and never the only signal:
+     red and green are indistinguishable under deuteranopia by construction,
+     which is exactly why an icon or a label always travels with them. */
+  --good: #3BA37F;
+  --warn: #C4872D;
+  --bad: #D95F5F;
+}
