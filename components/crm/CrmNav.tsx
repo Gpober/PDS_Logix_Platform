@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 const standalone = [
   { href: '/crm', label: 'Home' },
   { href: '/crm/assistant', label: 'Zordon' },
+  { href: '/crm/heartbeat', label: 'Heartbeat' },
 ];
 
 // Everything else lives in collapsible sections so the sidebar reads tidy.
