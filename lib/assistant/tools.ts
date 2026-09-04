@@ -104,6 +104,14 @@ async function resolveLead(query: string): Promise<{ lead?: Lead; error?: Json }
   };
 }
 
+// A YYYY-MM-DD date from tool input, or undefined. Anything else is dropped
+// rather than passed on, so a bad filter never silently matches nothing.
+function dateArg(value: unknown): string | undefined {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
+    ? value.trim()
+    : undefined;
+}
+
 const clamp = (n: unknown, def: number, max: number) => {
   const v = Number(n);
   return Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), max) : def;
@@ -263,26 +271,30 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_invoices',
     description:
-      'SEE invoices from QuickBooks — dates, due dates, amounts, balances (paid vs open), and customers. Pass a specific `number` to pull one, or omit it to list newest-first (set open_only for just the unpaid ones). Read-only.',
+      'SEE invoices from QuickBooks — dates, due dates, amounts, balances (paid vs open), customers, and when each was ENTERED in QuickBooks. Pass a specific `number` to pull one, or omit it to list newest-first (set open_only for just the unpaid ones). Use created_from/created_to to answer "what was entered/booked in August?" — it filters on the entry date, so it CATCHES an invoice dated in July but keyed in during August, which a question about invoice dates would miss. Read-only.',
     input_schema: {
       type: 'object',
       properties: {
         number: { type: 'string', description: 'A specific invoice number to look up (optional).' },
         open_only: { type: 'boolean', description: 'When listing, only invoices with an outstanding balance.' },
         limit: { type: 'number', description: 'Max invoices to list (default 50, max 200).' },
+        created_from: { type: 'string', description: 'YYYY-MM-DD. Only invoices ENTERED in QuickBooks on/after this date — regardless of the date on the invoice.' },
+        created_to: { type: 'string', description: 'YYYY-MM-DD, inclusive of the whole day. Only invoices ENTERED in QuickBooks on/before this date.' },
       },
     },
   },
   {
     name: 'get_bills',
     description:
-      'SEE bills from QuickBooks (money PDS owes vendors/suppliers) — vendor, dates, amounts, balances. Pass a specific `number`, or omit to list newest-first (open_only for unpaid). Read-only.',
+      'SEE bills from QuickBooks (money PDS owes vendors/suppliers) — vendor, dates, amounts, balances, and when each was ENTERED in QuickBooks. Pass a specific `number`, or omit to list newest-first (open_only for unpaid). Use created_from/created_to for "what was entered in August?" — it catches a July-dated bill keyed in during August. Read-only.',
     input_schema: {
       type: 'object',
       properties: {
         number: { type: 'string', description: 'A specific bill number to look up (optional).' },
         open_only: { type: 'boolean', description: 'When listing, only unpaid bills.' },
         limit: { type: 'number', description: 'Max bills to list (default 50, max 200).' },
+        created_from: { type: 'string', description: 'YYYY-MM-DD. Only bills ENTERED in QuickBooks on/after this date — regardless of the date on the bill.' },
+        created_to: { type: 'string', description: 'YYYY-MM-DD, inclusive of the whole day. Only bills ENTERED in QuickBooks on/before this date.' },
       },
     },
   },
@@ -902,22 +914,48 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
 
     case 'get_invoices': {
       const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
-      const res = await getInvoices({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
+      const createdFrom = dateArg(input.created_from);
+      const createdTo = dateArg(input.created_to);
+      const res = await getInvoices({
+        number,
+        openOnly: input.open_only === true,
+        limit: clamp(input.limit, 50, 200),
+        createdFrom,
+        createdTo,
+      });
       if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
+      // Name the clock the list was filtered on, so "entered in August" is
+      // never read back as "dated in August".
+      const basis = createdFrom || createdTo
+        ? { basis: 'entered in QuickBooks', createdFrom, createdTo }
+        : {};
       return number
         ? { found: d.found ?? false, invoice: d.invoice ?? null }
-        : { count: d.count ?? 0, invoices: d.invoices ?? [] };
+        : { count: d.count ?? 0, ...basis, invoices: d.invoices ?? [] };
     }
 
     case 'get_bills': {
       const number = typeof input.number === 'string' && input.number.trim() ? input.number.trim() : undefined;
-      const res = await getBills({ number, openOnly: input.open_only === true, limit: clamp(input.limit, 50, 200) });
+      const createdFrom = dateArg(input.created_from);
+      const createdTo = dateArg(input.created_to);
+      const res = await getBills({
+        number,
+        openOnly: input.open_only === true,
+        limit: clamp(input.limit, 50, 200),
+        createdFrom,
+        createdTo,
+      });
       if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       const d = res.data;
-      return number ? { found: d.found ?? false, bill: d.bill ?? null } : { count: d.count ?? 0, bills: d.bills ?? [] };
+      const basis = createdFrom || createdTo
+        ? { basis: 'entered in QuickBooks', createdFrom, createdTo }
+        : {};
+      return number
+        ? { found: d.found ?? false, bill: d.bill ?? null }
+        : { count: d.count ?? 0, ...basis, bills: d.bills ?? [] };
     }
 
     case 'financials': {
