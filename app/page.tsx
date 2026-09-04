@@ -1,11 +1,14 @@
 import { redirect } from 'next/navigation';
 import { getCurrentProfile } from '@/lib/crm/data';
+import { Landing } from '@/components/marketing/Landing';
 
 export const dynamic = 'force-dynamic';
 
-// The root simply routes people to the right place: into the CRM if signed in,
-// otherwise to the login screen.
+// Signed in, go to work. Signed out, land somewhere that says what this is —
+// previously an anonymous visitor was bounced straight to a password box with
+// no indication of what it belonged to.
 export default async function Home() {
   const profile = await getCurrentProfile();
-  redirect(profile ? '/crm' : '/login');
+  if (profile) redirect('/crm');
+  return <Landing />;
 }
