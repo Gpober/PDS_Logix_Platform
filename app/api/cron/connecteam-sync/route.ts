@@ -13,6 +13,18 @@ export const maxDuration = 60;
 // (form_id, external_id), so re-running a window repairs edits rather than
 // skipping them, and the overlap between runs is free.
 //
+// SCHEDULE — see vercel.json. This runs at 08:00 UTC, four hours ahead of the
+// daily report at 12:00 UTC. The gap is the point: crews log units through the
+// evening, and a sync that ran before they finished leaves those units out of
+// the copy until the following day. Syncing at 4am local means everything from
+// the day being reported is already stored by the time the report reads it, so
+// the copy is a sound fallback rather than one that is reliably a day short.
+//
+// Both crons are UTC while the business thinks in local time, so daylight
+// saving moves them: 08:00/12:00 UTC is 4am/8am Eastern in summer and 3am/7am
+// in winter. The four-hour gap holds either way, which is what actually
+// matters here.
+//
 // Manual use:
 //   ?dryRun=1                 — fetch + map but DON'T write; returns a sample.
 //   ?from=YYYY-MM-DD&to=...   — re-sync a specific range.
