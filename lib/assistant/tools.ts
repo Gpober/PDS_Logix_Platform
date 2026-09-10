@@ -19,6 +19,7 @@ import {
   listStaff,
   productionSummary,
 } from '@/lib/crm/data';
+import { productionSummaryFromSource } from '@/lib/production/source';
 import {
   listReconBatches,
   reconExceptions,
@@ -839,7 +840,34 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
     case 'production': {
       const day = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
       const location = typeof input.location === 'string' && input.location.trim() ? input.location.trim() : undefined;
-      const s = await productionSummary({ location, from: day(input.from) ? input.from : undefined, to: day(input.to) ? input.to : undefined });
+      const from = day(input.from) ? input.from : undefined;
+      const to = day(input.to) ? input.to : undefined;
+
+      // A bounded window reads Connecteam live (see lib/production/source.ts);
+      // an unbounded one means all history, which only the stored copy holds.
+      if (from && to) {
+        const { summary, read } = await productionSummaryFromSource({ from, to, location });
+        return {
+          total_units: summary.total_units,
+          date_from: summary.date_from,
+          date_to: summary.date_to,
+          by_location: summary.locations,
+          by_service_type: summary.by_service,
+          by_person: summary.by_staff.slice(0, 40),
+          by_month: summary.by_month,
+          note: 'Units serviced (condition reports & photo sets). Operational volume, not dollars — pair with client_financials for revenue per unit.',
+          source: read.label,
+          live: read.live,
+          ...(read.degraded
+            ? {
+                caveat:
+                  `These numbers came from the synced copy, not Connecteam itself (${read.reason ?? 'live read unavailable'}). Say so if you quote them.`,
+              }
+            : {}),
+        };
+      }
+
+      const s = await productionSummary({ location });
       return {
         total_units: s.total_units,
         date_from: s.date_from,
@@ -849,7 +877,8 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
         by_person: s.by_staff.slice(0, 40),
         by_month: s.by_month,
         note: 'Units serviced (condition reports & photo sets). Operational volume, not dollars — pair with client_financials for revenue per unit.',
-        source: 'Production log (Connecteam entries)',
+        source: 'Synced copy of Connecteam — all history. For a live figure, ask for a specific date range.',
+        live: false,
       };
     }
 

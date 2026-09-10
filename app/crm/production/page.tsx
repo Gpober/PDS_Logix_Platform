@@ -1,6 +1,6 @@
 import { getCurrentProfile, getProductionGoals, productionSummary, resolveMonthlyGoal } from '@/lib/crm/data';
 import { setProductionGoal, deleteProductionGoal } from '@/lib/crm/actions';
-import { createServerSupabase } from '@/lib/supabase/server';
+import { productionSummaryFromSource } from '@/lib/production/source';
 import { CrmHeader, Empty } from '@/components/crm/ui';
 import { ProductionImport } from '@/components/crm/ProductionImport';
 import { ProductionDashboard } from '@/components/crm/ProductionDashboard';
@@ -30,13 +30,14 @@ export default async function ProductionPage() {
   const summary = await productionSummary({ from: `${y}-01-01`, to: todayIso });
   const locations = (summary.locations ?? []).map((l) => String(l.location));
 
-  // Initial monthly goal (company-wide, current month).
-  const supabase = await createServerSupabase();
+  // Initial monthly goal (company-wide, current month). The actual comes from the
+  // same source layer as every other production number — the current month is
+  // inside the live window, so pace-to-goal reflects Connecteam as it stands now
+  // rather than last night's copy.
   const target = await resolveMonthlyGoal(null, month);
   const mStart = `${month}-01`;
-  const mEnd = now.getUTCMonth() === 11 ? `${y + 1}-01-01` : `${y}-${pad(now.getUTCMonth() + 2)}-01`;
-  const { count } = await supabase.from('production_entries').select('*', { count: 'exact', head: true }).gte('submitted_at', mStart).lt('submitted_at', mEnd);
-  const initialGoal = { target, actual: count ?? 0, location: null as string | null, period: month };
+  const { summary: monthSummary } = await productionSummaryFromSource({ from: mStart, to: todayIso });
+  const initialGoal = { target, actual: monthSummary.total_units, location: null as string | null, period: month };
 
   const goals = await getProductionGoals();
   const hasData = (summary.total_units ?? 0) > 0;
