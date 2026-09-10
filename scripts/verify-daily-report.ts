@@ -33,6 +33,7 @@ const data: ReportData = {
   workers: SAMPLE,
   reads: {} as ReportData['reads'],
   warnings: [],
+  late: null,
 };
 
 const out = renderReport(data);
@@ -43,16 +44,32 @@ const py = fs.readFileSync('docs/daily-production-email/preview.html', 'utf8')
   .replace('<!doctype html><meta charset="utf8"><body style="margin:0">', '')
   .replace(/<\/body>$/, '');
 
-const same = py === out.html;
+// The TS renderer replaces the footer's static "synced nightly" with live
+// provenance (which source served the run, and what reading live caught that
+// the copy had not). That line is DELIBERATELY different from the Python
+// reference; everything else — every number, tint, row and total — must still
+// match byte for byte, which is what this test is actually protecting.
+const FOOTER_PY = '&middot; synced nightly';
+const FOOTER_TS = '&middot; from the nightly synced copy';
+if (!out.html.includes(FOOTER_TS)) {
+  console.log(`FAIL: expected footer provenance ${JSON.stringify(FOOTER_TS)} not found`);
+  process.exit(1);
+}
+const normalised = out.html.split(FOOTER_TS).join(FOOTER_PY);
+const same = py === normalised;
 console.log('subject :', out.subject);
 console.log('piecework totals [dPc,dRev,wPc,wRev,mPc,mRev] :', out.totals.piecework.join(', '));
 console.log('photo     totals [dPc,dRev,wPc,wRev,mPc,mRev] :', out.totals.photo.join(', '));
 console.log('unpriced :', out.unpriced.length ? out.unpriced.join(', ') : '(none)');
-console.log(same ? '\nMATCH: identical to render_preview.py' : '\nDIFFER from render_preview.py');
+console.log(
+  same
+    ? '\nMATCH: identical to render_preview.py (footer provenance aside, asserted separately)'
+    : '\nDIFFER from render_preview.py',
+);
 
 if (!same) {
   const a = py.split('\n');
-  const b = out.html.split('\n');
+  const b = normalised.split('\n');
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     if (a[i] !== b[i]) {
       console.log(`\nfirst difference at line ${i + 1}`);

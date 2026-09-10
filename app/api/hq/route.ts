@@ -2,7 +2,7 @@ import { createMcpHandler } from 'mcp-handler';
 import { z } from 'zod';
 import { createServiceSupabase, serviceConfigured } from '@/lib/supabase/service';
 import { productionSummaryFromSource, readProduction } from '@/lib/production/source';
-import { reconcileProduction } from '@/lib/production/reconcile';
+import { reconcileProduction, lateArrivals } from '@/lib/production/reconcile';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -383,6 +383,33 @@ const handler = createMcpHandler(
           const { data, error } = await db().rpc('production_health', params);
           if (error) return `Error: ${error.message}`;
           return JSON.stringify(data);
+        }),
+    );
+
+    server.registerTool(
+      'production_late_arrivals',
+      {
+        description:
+          "What a LIVE Connecteam read catches that the nightly copy has not got yet — units logged after the sync ran. On the copy alone those units are invisible and look exactly like a quiet afternoon, so this is the number that shows a live read is earning its keep. Also reports units the copy still holds that Connecteam no longer has (voided since the sync). Use it to answer 'are we still capturing late entries'.",
+        inputSchema: z.object({
+          from: z.string().describe('Start date, YYYY-MM-DD'),
+          to: z.string().describe('End date, YYYY-MM-DD (inclusive)'),
+          location: z.string().optional(),
+        }),
+      },
+      async (args) =>
+        run(async () => {
+          const l = await lateArrivals({ from: args.from, to: args.to, location: args.location, sampleLimit: 50 });
+          return JSON.stringify({
+            window: l.window,
+            connecteam_now: l.live,
+            nightly_copy: l.stored,
+            logged_after_last_sync: l.capturedLive,
+            voided_since_last_sync: l.goneFromConnecteam,
+            reliable: l.reliable,
+            ...(l.reason ? { caveat: `${l.reason} — treat logged_after_last_sync as a floor, not a total.` } : {}),
+            sample: l.entries.slice(0, 20),
+          });
         }),
     );
   },
