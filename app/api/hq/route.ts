@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createServiceSupabase, serviceConfigured } from '@/lib/supabase/service';
 import { productionSummaryFromSource, readProduction } from '@/lib/production/source';
 import { reconcileProduction, lateArrivals } from '@/lib/production/reconcile';
+import { fetchFormCoverage } from '@/lib/connecteam/live';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -409,6 +410,48 @@ const handler = createMcpHandler(
             reliable: l.reliable,
             ...(l.reason ? { caveat: `${l.reason} — treat logged_after_last_sync as a floor, not a total.` } : {}),
             sample: l.entries.slice(0, 20),
+          });
+        }),
+    );
+
+    server.registerTool(
+      'connecteam_forms',
+      {
+        description:
+          "EVERY form Connecteam holds, read LIVE, next to the roster that decides which of them feed a production report. This is the only way to settle 'is that location idle, or is nothing reading it?' — a form nobody syncs and a location doing no work look identical in the stored data. Set count:true to also walk each form's submissions in the window (slower, but it proves whether a form has work nobody is counting). Also flags roster entries Connecteam no longer returns.",
+        inputSchema: z.object({
+          from: z.string().describe('Start date, YYYY-MM-DD'),
+          to: z.string().describe('End date, YYYY-MM-DD (inclusive)'),
+          count: z.boolean().optional().describe('Count submissions per form (slower). Default false.'),
+        }),
+      },
+      async (args) =>
+        run(async () => {
+          const c = await fetchFormCoverage({
+            from: args.from,
+            to: args.to,
+            countSubmissions: args.count ?? false,
+          });
+          const feeding = c.forms.filter((f) => f.onRoster);
+          const notFeeding = c.forms.filter((f) => !f.onRoster);
+          return JSON.stringify({
+            window: c.window,
+            read_in_seconds: Math.round(c.fetchedMs / 100) / 10,
+            complete: c.complete,
+            connecteam_forms_total: c.forms.length,
+            feeding_reports: feeding.length,
+            not_feeding_reports: notFeeding.length,
+            forms: c.forms.map((f) => ({
+              id: f.id,
+              name: f.name,
+              feeds_reports: f.onRoster,
+              counts_from: f.activeFrom,
+              submissions_in_window: f.submissions,
+              ...(f.truncated ? { caveat: 'walk truncated — count is a floor' } : {}),
+              ...(f.error ? { error: f.error } : {}),
+            })),
+            ...(c.rosterOrphans.length ? { roster_forms_connecteam_no_longer_returns: c.rosterOrphans } : {}),
+            ...(c.errors.length ? { errors: c.errors } : {}),
           });
         }),
     );
