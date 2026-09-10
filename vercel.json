@@ -5,10 +5,6 @@
       "schedule": "0 8 * * *"
     },
     {
-      "path": "/api/cron/daily-production-report",
-      "schedule": "5 12 * * *"
-    },
-    {
       "path": "/api/cron/heartbeat",
       "schedule": "0 12 * * 1-5"
     }

@@ -9,6 +9,18 @@ export const maxDuration = 60;
 // The daily piecework email — yesterday / this week / this month, pieces and
 // revenue, Piecework and Photo Dept.
 //
+// NOT SCHEDULED. This route has no cron entry in vercel.json and sends nothing
+// on its own. The revenue-only production report it renders was replaced on
+// 2026-09-01 by the Daily P&L (made / paid / kept), which a Claude Routine
+// sends at 12:00 UTC — scheduling this too would put a second, superseded
+// email in the same inboxes every morning.
+//
+// It is kept because it is still useful on demand: ?preview=1 renders the
+// report without sending, which is the quickest way to eyeball production for
+// a given day, and ?json=1 returns the figures with their source label. To
+// send it manually, pass ?to=someone@example.com — DAILY_REPORT_TO is
+// deliberately left unset so nothing can go out by accident.
+//
 // This replaces the Claude Routine that used to assemble it from the synced copy
 // of Connecteam. Built here, it reads the same source layer as every other
 // production number (Connecteam live for these windows, the stored copy as
