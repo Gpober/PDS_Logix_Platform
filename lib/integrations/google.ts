@@ -9,6 +9,11 @@ import { createServiceSupabase, serviceConfigured } from '@/lib/supabase/service
 export const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive.file',
+  // Sending the daily production report. Adding a scope does not retroactively
+  // grant it: Google must be reconnected once (Settings -> Google -> Connect)
+  // before the report can send. sendMail says so plainly rather than failing
+  // with a bare 403.
+  'https://www.googleapis.com/auth/gmail.send',
   'openid',
   'email',
 ];
@@ -88,4 +93,68 @@ export async function googleStatus(): Promise<{ configured: boolean; connected: 
 
 export async function disconnectGoogle(): Promise<void> {
   await createServiceSupabase().from('google_connections').delete().eq('id', 'singleton');
+}
+
+// ---- Gmail -----------------------------------------------------------------
+
+/** RFC 2047 for a Subject that may carry non-ASCII (a worker's name, an em dash). */
+function encodeHeader(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return /^[\x00-\x7F]*$/.test(value)
+    ? value
+    : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
+}
+
+export interface SendMailResult {
+  ok: boolean;
+  id?: string;
+  error?: string;
+}
+
+/**
+ * Send an HTML email as the connected Google account.
+ *
+ * There is no `from` control: Gmail sends as the authorised user. A real
+ * reports@ address would need a send-as alias configured on that account.
+ */
+export async function sendMail(opts: {
+  to: string[];
+  subject: string;
+  html: string;
+  cc?: string[];
+}): Promise<SendMailResult> {
+  if (!isGoogleConfigured()) return { ok: false, error: 'Google is not configured (GOOGLE_CLIENT_ID / SECRET).' };
+  const auth = await getAuthedClient();
+  if (!auth) return { ok: false, error: 'Google is not connected — no stored refresh token.' };
+  if (!opts.to.length) return { ok: false, error: 'No recipients.' };
+
+  const headers = [
+    `To: ${opts.to.join(', ')}`,
+    ...(opts.cc?.length ? [`Cc: ${opts.cc.join(', ')}`] : []),
+    `Subject: ${encodeHeader(opts.subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+  ].join('\r\n');
+
+  // Body base64 too, so a long HTML line cannot trip the 998-character line limit.
+  const body = Buffer.from(opts.html, 'utf8').toString('base64');
+  const raw = Buffer.from(`${headers}\r\n\r\n${body}`, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  try {
+    const gmail = google.gmail({ version: 'v1', auth });
+    const res = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+    return { ok: true, id: res.data.id ?? undefined };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'send failed';
+    // The likely cause the first time: the stored grant predates gmail.send.
+    const hint = /insufficient|scope|403/i.test(message)
+      ? ' — reconnect Google so the grant includes gmail.send.'
+      : '';
+    return { ok: false, error: message + hint };
+  }
 }
