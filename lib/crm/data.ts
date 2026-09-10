@@ -23,6 +23,7 @@ import {
   type TeamRun,
   type TimeEntryWithRelations,
 } from './types';
+import { productionSummaryFromSource, workerProductionFromSource } from '@/lib/production/source';
 
 // All reads use the request-scoped server client, so RLS runs as the logged-in
 // user. Owner/admin/member all get full read access to the CRM.
@@ -644,6 +645,18 @@ export interface ProductionSummary {
 }
 
 export async function productionSummary(opts?: { location?: string; from?: string; to?: string }): Promise<ProductionSummary> {
+  // A bounded range goes through the source layer, which reads Connecteam live
+  // when the window is recent enough and the stored copy otherwise. An unbounded
+  // request means "everything on record", which only the copy holds, so it stays
+  // on the RPC.
+  if (opts?.from && opts?.to) {
+    const { summary } = await productionSummaryFromSource({
+      from: opts.from,
+      to: opts.to,
+      location: opts.location,
+    });
+    return summary;
+  }
   const supabase = await createServerSupabase();
   const { data } = await supabase.rpc('get_production_summary', {
     p_location: opts?.location ?? null,
@@ -750,6 +763,20 @@ export interface WorkerProduction {
 }
 
 export async function workerProduction(staffName: string, from?: string, to?: string): Promise<WorkerProduction> {
+  // A bounded window reads Connecteam live, so a worker's own units and the
+  // company report they roll into can never come from two different places.
+  if (from && to) {
+    const { summary } = await workerProductionFromSource({ staffName, from, to });
+    return {
+      total_units: summary.total_units,
+      date_from: summary.date_from,
+      date_to: summary.date_to,
+      by_service: summary.by_service,
+      by_location: summary.locations,
+      by_month: summary.by_month,
+      by_day: summary.by_day,
+    };
+  }
   const supabase = await createServerSupabase();
   const { data } = await supabase.rpc('get_worker_production', { p_staff: staffName, p_from: from ?? null, p_to: to ?? null });
   const d = (data ?? {}) as Partial<WorkerProduction>;

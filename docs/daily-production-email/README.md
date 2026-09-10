@@ -15,8 +15,43 @@ the file here does not change the email.** Change both, or the design drifts.
 This copy exists so the design is version-controlled and reviewable, and so
 `render_preview.py` can show you a change before it reaches an inbox.
 
-The data behind it comes from `production_entries`, filled by the nightly sync
-documented in `supabase/README.md`.
+## Where the numbers come from
+
+The Routine currently calls `connecteam_production_report` on the **Connecteam**
+connector, which reads the `production_report` RPC over `production_entries` —
+the nightly *copy* of Connecteam, not Connecteam itself. That is the weak link:
+if the sync misses a day, a form, or a location, the email reports a slow day
+rather than a broken pipe, and nothing in the message says which it was.
+
+**Two things to change in the Routine's prompt** (this repo cannot change it —
+see above):
+
+1. **Call `production_health` first and honour its `warnings`.** Non-empty means
+   the copy is stale, a location has gone quiet, or a worker's entries are
+   unlinked from their staff record. Put the warning in the banner rather than
+   sending a clean-looking number over a broken sync.
+
+2. **Prefer the PDS Logix HQ connector's `piecework_payroll` and
+   `production_report` tools** over the Connecteam ones. They read Connecteam
+   **live** for recent windows — which every period in this email is — and fall
+   back to the copy only when live is unavailable, saying so in a `source` field
+   that belongs in the email footer. Yesterday / this week / this month are all
+   inside the live window, so the whole email can be live.
+
+Until the Routine is repointed, the email still reads the copy. The copy is much
+closer to congruent than it was — the sync now upserts instead of skipping, and
+covers every form on the `production_forms` roster rather than three hardcoded
+ids — but "close" is what `production_health` exists to measure.
+
+## Rules the numbers follow (source)
+
+- **A worker with production but no matching staff record still appears.**
+  `production_report` used to INNER JOIN `staff`, so an unmatched name vanished
+  from payroll entirely and could not even show as a zero. It LEFT JOINs now and
+  labels the row `Unlinked (no name on form)`; `production_health` counts them.
+- **Congruency with Connecteam is checkable, not assumed.** `production_reconcile`
+  on the HQ connector walks live Connecteam and the copy over the same window and
+  names every entry that differs. Run it before trusting a payroll period.
 
 ## The template
 
