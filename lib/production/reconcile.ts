@@ -54,6 +54,11 @@ export interface ReconcileResult {
   liveTotal: number;
   storedTotal: number;
   drift: number;
+  /** EXACT counts. The arrays below are capped samples; these are not — a
+   *  caller reporting "how many did live catch" must use these. */
+  missingCount: number;
+  extraCount: number;
+  mismatchCount: number;
   missingInStored: EntryRef[];
   extraInStored: EntryRef[];
   mismatched: MismatchedEntry[];
@@ -235,11 +240,75 @@ export async function reconcileProduction(opts: {
     liveTotal: liveRows.length,
     storedTotal: storedRows.length,
     drift: liveRows.length - storedRows.length,
+    missingCount,
+    extraCount,
+    mismatchCount,
     missingInStored,
     extraInStored,
     mismatched,
     byLocation: [...locs.values()].sort((a, b) => b.live - a.live || a.location.localeCompare(b.location)),
     notes,
     liveRead: liveMeta,
+  };
+}
+
+
+// ---- late arrivals ---------------------------------------------------------
+
+export interface LateArrivals {
+  window: { from: string; to: string };
+  /** Units Connecteam holds right now. */
+  live: number;
+  /** Units the nightly copy holds. */
+  stored: number;
+  /** Units present live but NOT in the copy — submitted (or edited into
+   *  existence) after the last sync ran. This is the number that proves a live
+   *  read is earning its keep: on the copy alone these units are invisible. */
+  capturedLive: number;
+  /** Units the copy still holds that Connecteam no longer has — voided over
+   *  there since the sync. Counted the same way and just as invisible. */
+  goneFromConnecteam: number;
+  /** False when the live read did not complete, in which case capturedLive is a
+   *  floor, not a total, and must be reported as such. */
+  reliable: boolean;
+  reason?: string;
+  /** A readable sample of what arrived late, newest first. */
+  entries: EntryRef[];
+}
+
+/**
+ * What a live read catches that the nightly copy has missed.
+ *
+ * People log units after the sync has run. Those units exist in Connecteam
+ * immediately and in the copy only the following night, so a report built on
+ * the copy silently understates the day — and looks exactly like a quiet
+ * afternoon. This measures that gap directly so the report can show it rather
+ * than the reader having to trust it.
+ */
+export async function lateArrivals(opts: {
+  from: string;
+  to: string;
+  location?: string;
+  budgetMs?: number;
+  sampleLimit?: number;
+}): Promise<LateArrivals> {
+  const r = await reconcileProduction({
+    from: opts.from,
+    to: opts.to,
+    location: opts.location,
+    budgetMs: opts.budgetMs,
+    sampleLimit: opts.sampleLimit ?? 100,
+  });
+  return {
+    window: r.window,
+    live: r.liveTotal,
+    stored: r.storedTotal,
+    capturedLive: r.missingCount,
+    goneFromConnecteam: r.extraCount,
+    reliable: r.liveComplete,
+    reason: r.liveComplete ? undefined : (r.notes[0] ?? 'live read did not complete'),
+    entries: [...r.missingInStored].sort((a, b) =>
+      (b.submitted_at ?? '').localeCompare(a.submitted_at ?? ''),
+    ),
   };
 }

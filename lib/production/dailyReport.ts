@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readProduction, type ProductionRead } from './source';
+import { lateArrivals, type LateArrivals } from './reconcile';
 import type { ProductionRow } from '@/lib/connecteam/client';
 
 // The photo department, by name. Everyone else the report returns is piecework —
@@ -115,6 +116,9 @@ export interface ReportData {
   /** Non-empty means the numbers below may be a broken pipe rather than a slow
    *  day. Rendered as the red banner. */
   warnings: string[];
+  /** What the live read caught that the nightly copy has not got yet. Null when
+   *  the comparison could not be made at all. */
+  late: LateArrivals | null;
 }
 
 /**
@@ -171,6 +175,23 @@ export async function collectReport(asOf: string): Promise<ReportData> {
     }
   }
 
+  // What did reading live actually buy us today? People log units after the
+  // sync runs, and on the copy alone those units are invisible — indistinguish-
+  // able from a quiet afternoon. Measure it so the report can show it.
+  let late: LateArrivals | null = null;
+  try {
+    late = await lateArrivals({ from: periods.day.from, to: periods.day.to, sampleLimit: 25 });
+    if (late.reliable && late.goneFromConnecteam > 0) {
+      warnings.push(
+        `${late.goneFromConnecteam} unit${late.goneFromConnecteam === 1 ? '' : 's'} in the nightly copy no longer exist in Connecteam and have been excluded.`,
+      );
+    }
+  } catch {
+    // A failed comparison must never block the report; it just means we cannot
+    // show the live-vs-copy delta this run.
+    late = null;
+  }
+
   const strip = (r: ProductionRead) => {
     const { rows: _rows, ...meta } = r;
     return meta;
@@ -180,6 +201,7 @@ export async function collectReport(asOf: string): Promise<ReportData> {
     workers,
     reads: { day: strip(dayRead), week: strip(weekRead), month: strip(monthRead) },
     warnings,
+    late,
   };
 }
 
@@ -232,6 +254,21 @@ function section(rows: WorkerRow[], kind: 'piecework' | 'photo'): { html: string
   return { html: out.join('\n'), totals, unpriced: [...unpriced].sort() };
 }
 
+/** The live-capture line. Deliberately NOT a warning: units arriving after the
+ *  sync is the normal case, and catching them is the point of reading live. It
+ *  belongs in the footer as provenance, not in the red block as an alarm. */
+function liveNote(late: LateArrivals | null): string {
+  if (!late) return '';
+  if (!late.reliable) {
+    return ' &middot; live-vs-copy check did not complete this run';
+  }
+  if (late.capturedLive > 0) {
+    const n = late.capturedLive;
+    return ` &middot; <strong style="color:#15803D;">${n} unit${n === 1 ? '' : 's'} logged after the last sync, caught by the live read</strong>`;
+  }
+  return ' &middot; live read matched the nightly copy exactly';
+}
+
 function banner(warnings: string[]): string {
   if (!warnings.length) return '';
   const items = warnings.map((w) => `<div style="padding-top:4px;">${esc(w)}</div>`).join('');
@@ -258,6 +295,7 @@ function loadTemplate(): string {
 export interface RenderedReport {
   html: string;
   subject: string;
+  late: LateArrivals | null;
   totals: { piecework: number[]; photo: number[] };
   unpriced: string[];
   warnings: string[];
@@ -272,7 +310,10 @@ export function renderReport(data: ReportData): RenderedReport {
   let html = loadTemplate()
     .replace('<!-- PIECEWORK_ROWS -->', pw.html)
     .replace('<!-- PHOTO_ROWS -->', ph.html)
-    .replace('<!-- WARNING_BANNER -->', banner(data.warnings));
+    .replace('<!-- WARNING_BANNER -->', banner(data.warnings))
+    // Provenance in the footer: which source served this, and what reading live
+    // caught that the copy had not.
+    .replace('&middot; synced nightly', `&middot; ${data.reads.day?.live ? 'read live from Connecteam' : 'from the nightly synced copy'}${liveNote(data.late)}`);
 
   const asOfLabel = new Date(`${data.asOf}T00:00:00Z`).toLocaleDateString('en-US', {
     month: 'short',
@@ -306,6 +347,7 @@ export function renderReport(data: ReportData): RenderedReport {
   return {
     html,
     subject: `PDS Daily Production — ${asOfLabel} — ${comma(pieces)} pieces`,
+    late: data.late,
     totals: { piecework: pw.totals, photo: ph.totals },
     unpriced: [...new Set([...pw.unpriced, ...ph.unpriced])],
     warnings: data.warnings,

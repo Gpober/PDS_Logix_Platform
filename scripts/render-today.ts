@@ -30,6 +30,7 @@ const data: ReportData = {
   workers,
   reads: {} as ReportData['reads'],
   warnings: [],
+  late: null,
 };
 
 const out = renderReport(data);
