@@ -14,6 +14,7 @@
 import {
   connecteamConfigured,
   getFormQuestions,
+  listForms,
   getSubmissions,
   getUsersMap,
   normalizeSubmission,
@@ -177,4 +178,121 @@ export async function fetchLiveProduction(opts: {
   const complete = formResults.every((f) => !f.error && !f.truncated);
 
   return { rows: filtered, complete, forms: formResults, errors, fetchedMs: Date.now() - started };
+}
+
+// ---- form coverage ---------------------------------------------------------
+
+export interface FormCoverage {
+  id: string;
+  name: string;
+  /** Is this form on the production_forms roster (i.e. does it feed reports)? */
+  onRoster: boolean;
+  /** Roster activation date, when it is on the roster. */
+  activeFrom: string | null;
+  enabled: boolean;
+  /** Submissions inside the window. Null when not counted (see countSubmissions). */
+  submissions: number | null;
+  /** True when the walk stopped before covering the window — the count is a
+   *  floor, not a total. */
+  truncated: boolean;
+  error?: string;
+}
+
+export interface FormCoverageResult {
+  window: { from: string; to: string };
+  forms: FormCoverage[];
+  /** Roster entries Connecteam did not return at all — a form deleted or
+   *  renamed over there while the roster still expects it. */
+  rosterOrphans: { id: string; name: string | null }[];
+  complete: boolean;
+  errors: string[];
+  fetchedMs: number;
+}
+
+/**
+ * Every form Connecteam holds, next to the roster that decides which of them
+ * feed a report — and, optionally, how many submissions each has in a window.
+ *
+ * This is the answer to "is that location idle, or is nothing reading it?",
+ * which no amount of querying the synced copy can settle: a form nobody syncs
+ * and a location doing no work look identical downstream.
+ */
+export async function fetchFormCoverage(opts: {
+  from: string;
+  to: string;
+  /** Counting walks each form's submissions and is much slower than listing.
+   *  Off by default so the listing itself is always cheap. */
+  countSubmissions?: boolean;
+  budgetMs?: number;
+}): Promise<FormCoverageResult> {
+  const started = Date.now();
+  const { from, to, countSubmissions = false, budgetMs = 25_000 } = opts;
+  const deadline = started + budgetMs;
+  const base: FormCoverageResult = {
+    window: { from, to },
+    forms: [],
+    rosterOrphans: [],
+    complete: false,
+    errors: [],
+    fetchedMs: 0,
+  };
+
+  if (!connecteamConfigured()) {
+    return { ...base, errors: ['CONNECTEAM_API_KEY not set'], fetchedMs: Date.now() - started };
+  }
+
+  const [listed, roster] = await Promise.all([listForms(), loadRoster()]);
+  if (listed.error) {
+    return { ...base, errors: [listed.error], fetchedMs: Date.now() - started };
+  }
+  const errors: string[] = roster.error ? [roster.error] : [];
+  const byId = new Map(roster.forms.map((f) => [f.id, f]));
+
+  const { fromTs, toTs } = windowBounds(from, to);
+
+  const forms: FormCoverage[] = await mapWithConcurrency(listed.forms, CONCURRENCY, async (f) => {
+    const rosterEntry = byId.get(f.id);
+    const row: FormCoverage = {
+      id: f.id,
+      name: f.name,
+      onRoster: Boolean(rosterEntry),
+      activeFrom: rosterEntry?.activeFrom ?? null,
+      enabled: Boolean(rosterEntry),
+      submissions: null,
+      truncated: false,
+    };
+    if (!countSubmissions) return row;
+    const s = await getSubmissions(f.id, fromTs, toTs, deadline, MAX_ROWS_PER_FORM);
+    if (s.error) {
+      row.error = s.error;
+      return row;
+    }
+    row.submissions = s.submissions.length;
+    row.truncated = s.truncated;
+    return row;
+  });
+
+  for (const f of forms) {
+    if (f.error) errors.push(`${f.name || f.id}: ${f.error}`);
+    if (f.truncated) errors.push(`${f.name || f.id}: submission walk truncated — count is a floor`);
+  }
+
+  const seen = new Set(forms.map((f) => f.id));
+  const rosterOrphans = roster.forms
+    .filter((f) => !seen.has(f.id))
+    .map((f) => ({ id: f.id, name: f.name }));
+  if (rosterOrphans.length) {
+    errors.push(
+      `${rosterOrphans.length} roster form(s) were not returned by Connecteam — deleted or renamed there`,
+    );
+  }
+
+  return {
+    window: { from, to },
+    forms: forms.sort((a, b) => (b.submissions ?? -1) - (a.submissions ?? -1) || a.name.localeCompare(b.name)),
+    rosterOrphans,
+    complete: !errors.length,
+    errors,
+    fetchedMs: Date.now() - started,
+  };
 }
