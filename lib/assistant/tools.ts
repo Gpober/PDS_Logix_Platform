@@ -127,7 +127,7 @@ const NOT_CONFIGURED = {
 };
 
 // The books reads (financials, client_financials, ar_aging, cash_calendar,
-// refresh_books) come from the PDS Logix data warehouse, not the partner API.
+// books_freshness) come from the PDS Logix data warehouse, not the partner API.
 const BOOKS_NOT_CONFIGURED = {
   configured: false,
   message: 'The books aren’t connected — set PDS_BOOKS_SUPABASE_URL / PDS_BOOKS_SUPABASE_KEY.',
@@ -394,9 +394,15 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: { weeks: { type: 'number', description: 'Weeks forward (default 8, e.g. 13 for a quarter).' } } },
   },
   {
-    name: 'refresh_books',
+    name: 'books_freshness',
     description:
-      "Check how current the books are — returns the latest ledger date (as-of) and the total line count. The books are synced from QuickBooks automatically on the I AM CFO side; this reports freshness rather than triggering a sync. Use when someone asks 'how current are the books', 'when were these last updated', or before a report if they wonder whether the numbers are stale.",
+      "Check how current the books are — returns the latest ledger date (as-of) and the total line count. READ ONLY: it reports freshness, it does not sync. Use when someone asks 'how current are the books', 'when were these last updated', or before a report if they wonder whether the numbers are stale. If the books turn out to be behind, resync_books is what pulls QuickBooks again.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'resync_books',
+    description:
+      "PROPOSE re-pulling QuickBooks into the books, then let the user confirm. This is what to use when books_freshness shows the ledger is behind, when someone has just changed something in QuickBooks and wants it reflected here, or when a number looks wrong and you suspect stale data rather than a real problem. It re-syncs journal lines, A/R and A/P aging and payment applications from QBO into the mirror every financial report reads from. It can take a minute or two on a busy ledger, and it changes what every subsequent number says — so check books_freshness FIRST and don't resync when the books are already current. Nothing in QuickBooks is modified: this only pulls, never pushes. Never claim it synced until the user confirms.",
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -733,7 +739,8 @@ export const TOOL_LABELS: Record<string, string> = {
   cash_flow: 'Building the cash-flow statement',
   cash_calendar: 'Reading the cash calendar',
   cash_forecast: 'Forecasting cash',
-  refresh_books: 'Checking book freshness',
+  books_freshness: 'Checking book freshness',
+  resync_books: 'Preparing a books re-sync',
   save_draft: 'Saving a draft',
   remember: 'Saving to memory',
   build_report: 'Building a report',
@@ -769,6 +776,10 @@ export const ACTION_TOOLS = [
   'import_staff',
   'import_time',
   'import_car_count',
+  // Pulls rather than pushes, so nothing in QuickBooks changes — but it rewrites
+  // the ledger every report reads from and can run for minutes, which is enough
+  // to deserve a confirmation rather than firing on a stray question.
+  'resync_books',
 ];
 
 // ---- dispatch ---------------------------------------------------------------
@@ -1184,14 +1195,15 @@ async function dispatch(name: string, input: Json): Promise<unknown> {
       };
     }
 
-    case 'refresh_books': {
+    case 'books_freshness': {
       const res = await getBooksFreshness();
       if (res.status === 'not_configured') return BOOKS_NOT_CONFIGURED;
       if (res.status === 'error') return { error: res.message };
       return {
         books_as_of: res.data.asOf,
         ledger_lines: res.data.lineCount,
-        message: 'The books are synced from QuickBooks automatically on the I AM CFO side. This is the latest data available now.',
+        message:
+          'This is the latest data in the mirror. QuickBooks syncs on a schedule; propose resync_books to pull it again now.',
       };
     }
 

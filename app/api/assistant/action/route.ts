@@ -8,6 +8,7 @@ import {
   createBill as iamcfoCreateBill,
   updateInvoice as iamcfoUpdateInvoice,
   deleteInvoices as iamcfoDeleteInvoices,
+  refreshBooks as iamcfoRefreshBooks,
 } from '@/lib/integrations/iamcfo';
 
 export const dynamic = 'force-dynamic';
@@ -134,6 +135,28 @@ export async function POST(req: Request) {
   const supabase = await createServerSupabase();
 
   try {
+    // ---- books ------------------------------------------------------------
+    // A pull, not a push: nothing in QuickBooks changes. It is gated because it
+    // rewrites the ledger every report reads from and can run for minutes.
+    if (kind === 'resync_books') {
+      if (!iamcfoConfigured()) {
+        return NextResponse.json({ ok: false, error: 'The books connection (I AM CFO) is not configured.' });
+      }
+      const res = await iamcfoRefreshBooks();
+      if (res.status === 'error') return NextResponse.json({ ok: false, error: res.message });
+      if (res.status === 'not_configured') {
+        return NextResponse.json({ ok: false, error: 'The books connection (I AM CFO) is not configured.' });
+      }
+      const lines = res.data?.syncedLines;
+      return NextResponse.json({
+        ok: true,
+        message:
+          typeof lines === 'number'
+            ? `Books re-synced from QuickBooks — ${lines.toLocaleString('en-US')} ledger lines refreshed.`
+            : 'Books re-synced from QuickBooks.',
+      });
+    }
+
     // ---- CRM writes --------------------------------------------------------
     if (kind === 'create_client') {
       const name = clean(input.name);
