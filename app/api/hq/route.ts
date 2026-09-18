@@ -4,9 +4,14 @@ import { createServiceSupabase, serviceConfigured } from '@/lib/supabase/service
 import { productionSummaryFromSource, readProduction } from '@/lib/production/source';
 import { reconcileProduction, lateArrivals } from '@/lib/production/reconcile';
 import { fetchFormCoverage } from '@/lib/connecteam/live';
+import { iamcfoConfigured, refreshBooks } from '@/lib/integrations/iamcfo';
+import { getBooksFreshness } from '@/lib/integrations/pdsbooks';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+// A books re-sync re-pulls the whole ledger window and can run for minutes. At
+// 60s the call would time out here while the sync carried on upstream, which
+// reads as a failure that isn't one.
+export const maxDuration = 300;
 
 /**
  * PDS Logix HQ — a remote MCP server for claude.ai custom connectors,
@@ -41,6 +46,64 @@ async function run(fn: () => Promise<string>): Promise<{ content: { type: 'text'
 
 const handler = createMcpHandler(
   (server) => {
+    // ---- books ------------------------------------------------------------
+    // The connector is otherwise operations-only, on the principle that the
+    // books live in I AM CFO and are read there. But "these numbers look stale"
+    // is a question that arrives mid-conversation here, and answering it with
+    // "go and press a button in another product" is a dead end — so the
+    // freshness read and the re-sync that fixes it both belong on this side.
+
+    server.registerTool(
+      'books_freshness',
+      {
+        description:
+          "How current the books are — the latest ledger date and the total line count. READ ONLY. Use it before quoting a financial figure someone might act on, or when a number looks wrong and stale data is a likelier explanation than a real problem. If the books are behind, resync_books pulls QuickBooks again.",
+        inputSchema: z.object({}),
+      },
+      async () =>
+        run(async () => {
+          const res = await getBooksFreshness();
+          if (res.status === 'not_configured') {
+            return JSON.stringify({ configured: false, message: 'The books connection (I AM CFO) is not configured.' });
+          }
+          if (res.status === 'error') return JSON.stringify({ error: res.message });
+          return JSON.stringify({ books_as_of: res.data.asOf, ledger_lines: res.data.lineCount });
+        }),
+    );
+
+    server.registerTool(
+      'resync_books',
+      {
+        description:
+          "Re-pull QuickBooks into the books — journal lines, A/R and A/P aging, payment applications — so every financial report reflects what QBO holds right now. Nothing in QuickBooks is modified: this only pulls, never pushes. It can run for a minute or two on a busy ledger and it changes what every subsequent number says, so check books_freshness first and don't re-sync books that are already current. CHANGES DATA — call with confirm:true only after telling the user what it will do.",
+        inputSchema: z.object({
+          confirm: z
+            .boolean()
+            .optional()
+            .describe('Required to actually re-sync. Omit to see what this would do.'),
+        }),
+      },
+      async ({ confirm }) =>
+        run(async () => {
+          if (confirm !== true) {
+            return JSON.stringify({
+              wouldRun: 'resync_books',
+              wrote: false,
+              message:
+                'This re-pulls QuickBooks into the books and can take a minute or two. Tell the user, then call again with confirm: true.',
+            });
+          }
+          if (!iamcfoConfigured()) {
+            return JSON.stringify({ configured: false, message: 'The books connection (I AM CFO) is not configured.' });
+          }
+          const res = await refreshBooks();
+          if (res.status !== 'ok') {
+            return JSON.stringify({ synced: false, error: res.status === 'error' ? res.message : 'not configured' });
+          }
+          return JSON.stringify({ synced: true, syncedLines: res.data?.syncedLines ?? null });
+        }),
+    );
+
     server.registerTool(
       'ops_snapshot',
       {
